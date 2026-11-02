@@ -1,0 +1,16 @@
+   [server]
+   maxUploadSize = 200
+
+   [client]
+   toolbarMode = "minimal"
+
+   [browser]
+   gatherUsageStats = false
+
+   [theme]
+   base = "light"
+   primaryColor = "#1f6feb"
+   backgroundColor = "#ffffff"
+   secondaryBackgroundColor = "#f3f6fa"
+   textColor = "#1b2430"
+   font = "sans serif"
