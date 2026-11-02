@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import calc  # noqa: E402
 
 SYS = {"FREIGHT_INCOME": 101, "LORRY_HIRE": 102, "COMMISSION_INCOME": 103,
-       "SHORTAGE_EXP": 104, "SHORTAGE_REC": 105, "DEMURRAGE_EXP": 106, "DEMURRAGE_INC": 107}
+       "SHORTAGE_EXP": 104, "SHORTAGE_REC": 105, "DEMURRAGE_EXP": 106, "DEMURRAGE_INC": 107, "TDS_REC": 108}
 
 
 def base_trip(**kw):
@@ -216,6 +216,25 @@ def test_advance_adjustment_keeps_books_right():
     assert net.get(ADJ, 0) == 0                                  # clearing account always back to zero
     assert a["party_balance"] == 0                               # trip shows paid
     assert net[PARTY] == Dec("-19400")                           # 19,400 advance still on account
+
+
+def test_party_tds_one_percent():
+    t = base_trip(tds_rate=Dec("1"), party_demurrage_amt=Dec("1000"))
+    a = calc.trip_amounts(t)
+    assert a["party_tds"] == Dec("316")                       # 1% of (30600 + 1000), rounded to rupee
+    assert a["party_balance"] == Dec("30600") + Dec("1000") - Dec("316")
+    assert a["net_profit"] == calc.trip_amounts(base_trip(party_demurrage_amt=Dec("1000")))["net_profit"]
+    lines = calc.trip_posting_lines(t, a, SYS)
+    assert calc.lines_balanced(lines)
+    net = {}
+    for acc, dr, cr in lines:
+        net[acc] = net.get(acc, Dec(0)) + dr - cr
+    assert net[108] == Dec("316") and net[1] == a["party_balance"]      # TDS receivable; party owes the rest
+    # party pays exactly the net amount -> settled
+    t2 = base_trip(tds_rate=Dec("1"), party_received=Dec("30294"), pod_received=True)
+    assert calc.party_settled(t2, calc.trip_amounts(t2))
+    assert calc.trip_amounts(base_trip(tds_rate=Dec("0")))["party_tds"] == 0
+    assert calc.trip_amounts(base_trip(tds_rate=Dec("1"), loaded_weight=None))["party_tds"] == 0
 
 
 if __name__ == "__main__":

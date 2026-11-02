@@ -37,7 +37,7 @@ def _particulars(r, side: str) -> str:
     vt, p = r["v_type"], r["purpose"] or ""
     if vt == "TRIP":
         if side == "PARTY":
-            return f"Freight bill {t}{gr}" + (" (less shortage)" if D(r["credit"]) else "")
+            return f"Freight bill {t}{gr}" + (" (less TDS / shortage)" if D(r["credit"]) else "")
         return f"Truck hire {t}{gr}" + (" (less commission/shortage)" if D(r["debit"]) else "")
     if vt == "RECEIPT":
         return ("Advance adjusted " if p == "ADJUST" else "Received ") + (t or "on account") + \
@@ -97,9 +97,9 @@ def account_statement(account_id: int, d_from, d_to, side: str) -> dict:
         if side == "PARTY":
             rows_ = [[t["truck_no"] or "", t.get("gr_no") or "", f"{t['loading_date']:%d/%m/%y}" if t.get("loading_date")
                       else "", t["billing_weight"], t["party_rate"], t["party_freight"] + t["party_demurrage"],
-                      t["party_shortage"], t["party_received"], t["party_balance"]] for t in open_trips]
-            cols = ["Truck", "GR", "Loaded", "Wt (T)", "Rate", "Freight+Dem", "Shortage", "Received", "Balance"]
-            money = {5, 6, 7, 8}
+                      t["party_tds"], t["party_shortage"], t["party_received"], t["party_balance"]] for t in open_trips]
+            cols = ["Truck", "GR", "Loaded", "Wt (T)", "Rate", "Freight+Dem", "TDS", "Shortage", "Received", "Balance"]
+            money = {5, 6, 7, 8, 9}
         else:
             rows_ = [[t["truck_no"] or "", t["trip_no"], f"{t['loading_date']:%d/%m/%y}" if t.get("loading_date") else "",
                       t["truck_hire"] + t["truck_demurrage"], t["truck_paid"] + t["diesel"],
@@ -161,6 +161,8 @@ def trip_statement(trip_id: int) -> dict:
     if t["party_demurrage"]:
         party_calc.append(["+ Demurrage", "", t["party_demurrage"]])
     party_calc.append(["− Received", "", t["party_received"]])
+    if t["party_tds"]:
+        party_calc.append(["− TDS", f"{t['tds_rate']}%", t["party_tds"]])
     if t["party_shortage"]:
         party_calc.append(["− Shortage / damage", "", t["party_shortage"]])
     tables = [

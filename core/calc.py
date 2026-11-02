@@ -72,11 +72,17 @@ def trip_amounts(trip: dict) -> dict:
     truck_dem = r2(D(trip.get("truck_demurrage_amt"))) if loaded else ZERO
     party_dem = r2(D(trip.get("party_demurrage_amt"))) if loaded else ZERO
 
+    # TDS: party pays freight after deducting TDS (default 1%) on freight + demurrage.
+    # It is not a loss — it is our income-tax credit (TDS Receivable), shown in Form 26AS.
+    tds_rate = D(trip.get("tds_rate")) if trip.get("tds_rate") is not None else ZERO
+    party_tds = (((party_freight + party_dem) * tds_rate / Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                 if loaded and tds_rate > 0 else ZERO)
+
     party_received = r2(D(trip.get("party_received")))
     truck_paid = r2(D(trip.get("truck_paid")))
     diesel = r2(D(trip.get("diesel")))
 
-    party_balance = party_freight + party_dem - party_received - party_short
+    party_balance = party_freight + party_dem - party_received - party_short - party_tds
     truck_balance = truck_hire + truck_dem - truck_paid - diesel - commission - truck_short
     margin = party_freight - truck_hire
     net_profit = margin + commission - party_short + truck_short + party_dem - truck_dem
@@ -91,6 +97,8 @@ def trip_amounts(trip: dict) -> dict:
         "truck_shortage": truck_short,
         "truck_demurrage": truck_dem,
         "party_demurrage": party_dem,
+        "tds_rate": tds_rate,
+        "party_tds": party_tds,
         "party_received": party_received,
         "truck_paid": truck_paid,
         "diesel": diesel,
@@ -179,6 +187,10 @@ def trip_posting_lines(trip: dict, amt: dict, sys_acc: dict) -> list[tuple[int, 
     pair(owner, sys_acc["COMMISSION_INCOME"], amt["commission"])
     pair(sys_acc["SHORTAGE_EXP"], party, amt["party_shortage"])
     pair(owner, sys_acc["SHORTAGE_REC"], amt["truck_shortage"])
+    if amt.get("party_tds", ZERO) > 0:
+        if "TDS_REC" not in sys_acc:
+            raise ValueError("TDS account is missing. Run the latest schema.sql in Supabase once.")
+        pair(sys_acc["TDS_REC"], party, amt["party_tds"])
     if amt["truck_demurrage"] > 0 or amt["party_demurrage"] > 0:
         if "DEMURRAGE_EXP" not in sys_acc or "DEMURRAGE_INC" not in sys_acc:
             raise ValueError("Demurrage accounts are missing. Run the latest schema.sql in Supabase once.")

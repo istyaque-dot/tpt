@@ -139,7 +139,8 @@ TRIP_FIELDS = ["booking_date", "party_id", "from_place", "to_place", "material",
                "unloaded_weight", "unloading_date", "pod_received", "pod_date", "gr_no", "gr_date",
                "freight_basis", "commission_type", "commission_value", "party_shortage_amt",
                "truck_shortage_amt", "remarks", "truck_demurrage_amt", "party_demurrage_amt", "demurrage_days",
-               "pod_submitted", "pod_submit_date", "pod_submit_mode", "pod_submit_ref", "party_demurrage_days"]
+               "pod_submitted", "pod_submit_date", "pod_submit_mode", "pod_submit_ref", "party_demurrage_days",
+               "tds_rate"]
 
 
 def _clean(data: dict) -> dict:
@@ -149,9 +150,47 @@ def _clean(data: dict) -> dict:
     return data
 
 
-def create_trip(data: dict) -> int:
+def find_truck(text: str, trucks: list[dict]) -> dict | None:
+    """Typed truck no. -> existing truck. Full number, or last 3-4 digits when only one truck matches."""
+    key = calc.normalize_truck_no(text)
+    if not key:
+        return None
+    for t in trucks:
+        if t["truck_no"] == key:
+            return t
+    if key.isdigit() and len(key) >= 3:
+        hits = [t for t in trucks if t["truck_no"].endswith(key)]
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
+def resolve_truck(cur, truck_no: str, owner_name: str | None) -> int:
+    """Truck id for a typed truck no.; creates the truck (and its owner) the first time it is used.
+    Owner left blank -> the owner account is named after the truck itself."""
+    key = calc.normalize_truck_no(truck_no)
+    cur.execute("select id from trucks where truck_no = %s", (key,))
+    row = cur.fetchone()
+    if row:
+        return row["id"]
+    name = (owner_name or "").strip() or key
+    cur.execute("insert into accounts (name, acc_type) values (%s, 'OWNER') "
+                "on conflict (acc_type, name) do update set active = true returning id", (name,))
+    owner_id = cur.fetchone()["id"]
+    cur.execute("insert into trucks (truck_no, owner_id) values (%s, %s) returning id", (key, owner_id))
+    return cur.fetchone()["id"]
+
+
+def looks_like_truck_no(text: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{3,4}", calc.normalize_truck_no(text)))
+
+
+def create_trip(data: dict, new_truck_no: str | None = None, new_owner: str | None = None) -> int:
     data = _clean(data)
     with db.tx() as cur:
+        if new_truck_no and not data.get("truck_id"):
+            data["truck_id"] = resolve_truck(cur, new_truck_no, new_owner)
         if data.get("truck_id"):
             cur.execute("select owner_id from trucks where id=%s", (data["truck_id"],))
             data["owner_id"] = cur.fetchone()["owner_id"]
@@ -168,9 +207,11 @@ def create_trip(data: dict) -> int:
     return tid
 
 
-def update_trip(trip_id: int, data: dict):
+def update_trip(trip_id: int, data: dict, new_truck_no: str | None = None, new_owner: str | None = None):
     data = _clean(data)
     with db.tx() as cur:
+        if new_truck_no:
+            data["truck_id"] = resolve_truck(cur, new_truck_no, new_owner)
         cur.execute("select * from trips where id=%s for update", (trip_id,))
         old = dict(cur.fetchone())
         if "truck_id" in data:

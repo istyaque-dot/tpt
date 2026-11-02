@@ -141,6 +141,20 @@ Har payment entry mein Trip No. link hoga (pump payment aur contra ko chhodkar).
 7. **GR ke bina truck balance**: by default allowed; Settings mein "GR zaroori" on kar sakte hain.
 8. **POD upload**: by default POD copy upload hote hi trip "POD received" ho jaati hai (Settings mein band kar sakte hain).
 
+## Party TDS (Nov 2026)
+- Party freight dete waqt **TDS (default 1%)** kaat kar deti hai. Har trip mein "Party TDS %" (Settings mein default).
+- TDS = (Freight + Party demurrage) × TDS% — poore rupaye mein round.
+- Party Balance = Freight + Demurrage − Received − **TDS** − Shortage
+- Entry: **TDS Receivable Dr / Party Cr** (trip bill ke saath apne aap). TDS kharcha nahi hai — ye aapka income-tax
+  credit hai (Form 26AS / ITR mein milta hai), isliye profit nahi ghatata. Trial balance mein "TDS Receivable" dikhega.
+- Purani trips (TDS column se pehle wali) par TDS 0 rehta hai, unka hisaab nahi badalta.
+
+## Truck & Commission (Nov 2026)
+- Truck No. **type** hota hai. Purana truck: poora number ya last 3–4 digit (agar ek hi truck mile).
+  Naya truck: Save par apne aap ban jaata hai; owner ka naam optional (khaali = truck no. hi owner).
+- Destination, From, Material — type karte hain.
+- Commission sirf **fixed ₹**, har trip mein haath se.
+
 ## Trip entry ka order (mobile screen)
 Truck No. → Destination → Weight → Truck rate → Freight rate → Freight paying company → GR No. (agar ho) → Comment.
 - Weight bhar diya toh trip usi din **Loaded** maani jaati hai (loading date = trip date) aur bill ban jaata hai.

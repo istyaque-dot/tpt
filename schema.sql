@@ -13,6 +13,7 @@ insert into settings (key, value) values
     ('company_name',                 'My Transport'),
     ('default_commission_type',      'FIXED'),      -- FIXED (Rs per trip) or PERCENT (of truck hire)
     ('default_commission_value',     '0'),
+    ('default_tds_rate',             '1'),        -- % TDS the party deducts from freight
     ('freight_basis',                'LOADED'),     -- LOADED or UNLOADED weight
     ('require_gr_for_truck_balance', 'false'),      -- GR No. must be filled before truck balance payment
     ('pod_upload_marks_received',    'true'),       -- uploading a POD copy ticks "POD received"
@@ -46,6 +47,7 @@ alter table accounts add constraint accounts_acc_type_check
 insert into accounts (name, acc_type, system_code) values
     ('Cash',              'CASH',    'CASH'),
     ('Advance Adjustment','OTHER',   'ADV_ADJ'),
+    ('TDS Receivable',    'OTHER',   'TDS_REC'),
     ('Freight Income',    'INCOME',  'FREIGHT_INCOME'),
     ('Lorry Hire',        'EXPENSE', 'LORRY_HIRE'),
     ('Commission Income', 'INCOME',  'COMMISSION_INCOME'),
@@ -121,6 +123,8 @@ alter table trips add column if not exists pod_submit_date date;
 alter table trips add column if not exists pod_submit_mode text;      -- Hand / Courier / Email / WhatsApp
 alter table trips add column if not exists pod_submit_ref  text;      -- courier docket / person name
 alter table trips add column if not exists party_demurrage_days integer;
+-- TDS % deducted by the party on this trip's freight (old trips: 0 so their hisaab does not change)
+alter table trips add column if not exists tds_rate numeric(5,2) not null default 0;
 
 create unique index if not exists trips_gr_unique
     on trips (upper(gr_no)) where gr_no is not null and is_cancelled = false;

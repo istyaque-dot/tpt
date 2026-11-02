@@ -46,8 +46,9 @@ def trip_check(t: dict) -> list[dict]:
                    f"{t['truck_hire']} + {t['truck_demurrage']} − {t['truck_paid']} − {t['diesel']} − "
                    f"{t['commission']} − {t['truck_shortage']}")
         row("Truck balance (owner)", formula, t["truck_balance"], -led.get(t["owner_id"], calc.ZERO))
-    row("Party balance", f"freight + demurrage − received − shortage = {t['party_freight']} + "
-        f"{t['party_demurrage']} − {t['party_received']} − {t['party_shortage']}", t["party_balance"],
+    row("Party balance", f"freight + demurrage − received − TDS − shortage = {t['party_freight']} + "
+        f"{t['party_demurrage']} − {t['party_received']} − {t['party_tds']} − {t['party_shortage']}",
+        t["party_balance"],
         led.get(t["party_id"], calc.ZERO))
     row("Profit", "margin + commission − party short + truck short + party dem − truck dem", t["net_profit"],
         -sum((v for a, v in led.items() if a in _income_expense_ids()), calc.ZERO))
