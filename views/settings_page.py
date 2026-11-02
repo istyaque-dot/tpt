@@ -8,12 +8,10 @@ s = db.get_settings()
 with st.form("settings"):
     company = st.text_input("Company name", value=s.get("company_name", ""))
     st.markdown("**Defaults for new trips** (old trips keep their own values)")
-    c1, c2 = st.columns(2)
-    ctype = c1.selectbox("Default commission type", ["FIXED", "PERCENT"],
-                         index=0 if s.get("default_commission_type") == "FIXED" else 1,
-                         format_func=lambda x: "Fixed ₹ per trip" if x == "FIXED" else "% of truck hire")
-    cval = c2.number_input("Default commission value", min_value=0.0, step=10.0,
-                           value=float(s.get("default_commission_value") or 0))
+    tds = st.number_input("Party TDS % (party freight se kaatti hai)", min_value=0.0, max_value=10.0, step=0.5,
+                          value=float(s.get("default_tds_rate", "1") or 0),
+                          help="Har nayi trip mein ye % pehle se bhara aayega; trip mein badal sakte ho.")
+    st.caption("Commission har trip mein haath se ₹ mein likha jaata hai.")
     basis = st.selectbox("Freight & hire charged on", ["LOADED", "UNLOADED"],
                          index=0 if s.get("freight_basis", "LOADED") == "LOADED" else 1,
                          format_func=lambda x: f"{x.title()} weight")
@@ -25,8 +23,7 @@ with st.form("settings"):
     root = st.text_input("Google Drive main folder name", value=s.get("drive_root_folder_name", "Transport Docs"),
                          help="Change this only before the first upload.")
     if st.form_submit_button("Save settings", type="primary"):
-        for k, v in {"company_name": company, "default_commission_type": ctype,
-                     "default_commission_value": cval, "freight_basis": basis,
+        for k, v in {"company_name": company, "default_tds_rate": tds, "freight_basis": basis,
                      "require_gr_for_truck_balance": str(req_gr).lower(),
                      "pod_upload_marks_received": str(pod_auto).lower(),
                      "drive_root_folder_name": root.strip() or "Transport Docs"}.items():

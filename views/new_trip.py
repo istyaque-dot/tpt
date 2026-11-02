@@ -77,21 +77,26 @@ def _idx(options, value):
     return options.index(value) if value in options else None
 
 
-# 1. Truck
-c1, c2 = st.columns([3, 1])
-new_t = st.session_state.get("nt_new_truck") or pf.get("truck_id")
-truck_id = c1.selectbox("1. Truck No. *", tids, format_func=lambda i: tinfo[i]["truck_no"], key=K("truck"),
-                        index=tids.index(new_t) if new_t in tids else None, placeholder="Type last digits")
-with c2:
-    st.write("")
-    forms.quick_add_truck("nt")
-if truck_id:
-    st.caption(f"Owner: {tinfo[truck_id]['owner_name']}"
-               + (f" · Driver: {tinfo[truck_id]['driver_name']}" if tinfo[truck_id]["driver_name"] else ""))
+# 1. Truck — typed. Old truck: found by full number or last digits. New truck: created on Save.
+truck_txt = st.text_input("1. Truck No. *", key=K("truck"), value=pf.get("truck_no") or "",
+                          placeholder="e.g. RJ14AB1234 (or last 4 digits of an old truck)")
+truck_hit = trips.find_truck(truck_txt, trucks_) if truck_txt.strip() else None
+truck_id, new_truck, new_owner = None, None, None
+if truck_hit:
+    truck_id = truck_hit["id"]
+    st.caption(f"✅ {truck_hit['truck_no']} · Owner: {truck_hit['owner_name']}"
+               + (f" · Driver: {truck_hit['driver_name']}" if truck_hit.get("driver_name") else ""))
+elif truck_txt.strip():
+    if trips.looks_like_truck_no(truck_txt):
+        new_truck = calc.normalize_truck_no(truck_txt)
+        new_owner = st.text_input(f"🆕 Naya truck {new_truck} — owner ka naam (optional)", key=K("owner"),
+                                  placeholder="Khaali chhodo to truck no. hi owner ka naam ban jaayega")
+    else:
+        st.warning("Poora truck no. likho (jaise RJ14AB1234). Last digits se koi ek purana truck nahi mila.")
 
-# 2. Destination
-to_place = st.selectbox("2. Destination *", places, index=_idx(places, pf.get("to_place")),
-                        accept_new_options=True, key=K("to"), placeholder="Select or type new")
+# 2. Destination — typed
+to_place = st.text_input("2. Destination *", key=K("to"), value=pf.get("to_place") or "",
+                         placeholder="e.g. Delhi")
 
 # 3-5. Weight and rates (live calculation)
 weight = ui.amount("3. Weight (ton)", K("wt"), value=float(pf["weight"]) if pf.get("weight") else None,
@@ -103,12 +108,23 @@ with c1:
 with c2:
     party_rate = ui.amount("5. Freight ₹/ton *", K("prate"), step=10.0,
                            value=float(pf["party_rate"]) if pf.get("party_rate") else None)
+c1, c2 = st.columns(2)
+with c1:
+    cval = ui.amount("Commission ₹", K("cval"), step=50.0, help="Truck bhade se katne wala commission (fixed ₹)")
+with c2:
+    tds_rate = calc.D(st.number_input("Party TDS %", min_value=0.0, max_value=10.0, step=0.5, key=K("tds"),
+                                      value=float(db.setting("default_tds_rate", "1") or 0),
+                                      help="Party freight se itna % TDS kaat kar degi"))
 if weight > 0 and (truck_rate > 0 or party_rate > 0):
     hire = calc.r2(weight * truck_rate)
     freight = calc.r2(weight * party_rate)
+    tds_amt = calc.trip_amounts({"truck_id": 1, "loaded_weight": weight, "party_rate": party_rate,
+                                 "tds_rate": tds_rate})["party_tds"]
     with st.container(border=True):
-        ui.metric_grid([("Truck hire", ui.inr(hire)), ("Party freight", ui.inr(freight))])
-        st.caption(f"Margin ₹ {ui.inr(freight - hire)}  (before commission)")
+        ui.metric_grid([("Truck hire", ui.inr(hire)), ("Party freight", ui.inr(freight)),
+                        ("Truck ko milega", ui.inr(hire - cval)), ("Party se aayega", ui.inr(freight - tds_amt))])
+        st.caption(f"Commission ₹{ui.inr(cval)} · TDS {tds_rate}% = ₹{ui.inr(tds_amt)} · "
+                   f"Profit ₹{ui.inr(freight - hire + cval)}")
 
 # 6. Freight paying company
 c1, c2 = st.columns([3, 1])
@@ -127,34 +143,25 @@ _note = " · ".join(x for x in (f"Adv {pf['advance']}" if pf.get("advance") else
 remarks = st.text_area("8. Comment / note to remember", key=K("note"), height=80, value=_note,
                        placeholder="e.g. driver will call at unloading, party wants POD original")
 
-with st.expander("More: From, material, date, commission"):
+with st.expander("More: From, material, date"):
     c1, c2 = st.columns(2)
-    last_from = pf.get("from_place") or st.session_state.get("_last_from")
-    from_place = c1.selectbox("From", places, accept_new_options=True, key=K("from"), placeholder="Optional",
-                              index=places.index(last_from) if last_from in places else None)
-    material = c2.selectbox("Material", materials, index=_idx(materials, pf.get("material")),
-                            accept_new_options=True, key=K("mat"),
-                            placeholder="Optional")
-    c1, c2 = st.columns(2)
-    trip_date = c1.date_input("Trip date", value=clock.today(), format="DD/MM/YYYY", key=K("date"))
-    ctype = c2.selectbox("Commission", ["FIXED", "PERCENT"], key=K("ctype"),
-                         index=0 if db.setting("default_commission_type") == "FIXED" else 1,
-                         format_func=lambda x: "Fixed ₹" if x == "FIXED" else "% of hire")
-    cval = st.number_input("Commission value", min_value=0.0, step=10.0, key=K("cval"),
-                           value=float(db.setting("default_commission_value", "0") or 0))
+    last_from = pf.get("from_place") or st.session_state.get("_last_from") or ""
+    from_place = c1.text_input("From", key=K("from"), value=last_from, placeholder="Optional")
+    material = c2.text_input("Material", key=K("mat"), value=pf.get("material") or "", placeholder="Optional")
+    trip_date = st.date_input("Trip date", value=clock.today(), format="DD/MM/YYYY", key=K("date"))
 
 if st.button("💾 Save trip", type="primary", use_container_width=True):
     errs = []
-    if not truck_id:
-        errs.append("Select truck.")
+    if not truck_id and not new_truck:
+        errs.append("Truck No. likho.")
     if not (to_place or "").strip():
-        errs.append("Enter destination.")
+        errs.append("Destination likho.")
     if truck_rate <= 0:
-        errs.append("Enter truck rate.")
+        errs.append("Truck rate likho.")
     if party_rate <= 0:
-        errs.append("Enter freight rate.")
+        errs.append("Freight rate likho.")
     if not party_id:
-        errs.append("Select the company paying freight.")
+        errs.append("Freight dene wali company chuno.")
     if errs:
         ui.show_errors(errs)
     else:
@@ -162,19 +169,20 @@ if st.button("💾 Save trip", type="primary", use_container_width=True):
         try:
             tid = trips.create_trip(dict(
                 booking_date=trip_date, party_id=party_id, from_place=(from_place or "").strip() or None,
-                to_place=to_place.strip(), material=(material or "").strip() or None,
+                to_place=to_place.strip().title() if to_place.strip().islower() else to_place.strip(),
+                material=(material or "").strip() or None,
                 party_rate=party_rate, truck_id=truck_id, truck_rate=truck_rate,
                 loaded_weight=weight if loaded else None, loading_date=trip_date if loaded else None,
                 gr_no=gr_no, gr_date=trip_date if gr_no.strip() else None,
                 freight_basis=db.setting("freight_basis", "LOADED"),
-                commission_type=ctype, commission_value=cval, remarks=remarks.strip() or None))
+                commission_type="FIXED", commission_value=cval, tds_rate=tds_rate,
+                remarks=remarks.strip() or None), new_truck_no=new_truck, new_owner=new_owner)
         except psycopg2.errors.UniqueViolation:
             st.error(f"GR No. {calc.normalize_gr(gr_no)} is already used in another trip.")
             st.stop()
-        if from_place:
+        if from_place.strip():
             st.session_state["_last_from"] = from_place.strip()
-        for k in ("nt_new_party", "nt_new_truck"):
-            st.session_state.pop(k, None)
+        st.session_state.pop("nt_new_party", None)
         st.session_state["last_new_trip"] = tid
         st.session_state["nt_msg_advance"] = pf.get("advance")
         st.session_state.pop("nt_prefill", None)

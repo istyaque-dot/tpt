@@ -160,6 +160,7 @@ if sel == SECTIONS[0]:
         with st.container(border=True):
             for name, amt, sign in (("Freight", a["party_freight"], "+"), ("Demurrage", a["party_demurrage"], "+"),
                                     ("Received", a["party_received"], "−"),
+                                    (f"TDS {a['tds_rate']}% (party ne kaata)", a["party_tds"], "−"),
                                     ("Shortage / damage", a["party_shortage"], "−")):
                 if amt or name in ("Freight", "Received"):
                     c1, c2 = st.columns([3, 2])
