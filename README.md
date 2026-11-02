@@ -55,6 +55,13 @@ columns / tables / accounts jodta hai, purana data nahi chhoota.
 2. **Settings**: commission default, freight loaded/unloaded, rules.
 3. **Trips → New Booking**.
 
+## 🤖 AI (free)
+1. aistudio.google.com → Gmail se login → **Get API key → Create API key** → copy.
+2. Streamlit → Manage app → Settings → Secrets → **sabse upar** `GEMINI_API_KEY = "..."` → Save.
+3. App → Settings → **Test AI**.
+Phir: New Trip mein message / GR photo se form, trip upload mein "🤖 AI se padho", GR/POD Documents mein
+"🤖 Scanned POD (AI kaatega)".
+
 ## Speed & login (professional version)
 - **Login yaad rehta hai (30 din)**: login karte waqt "Remember on this phone" tick rehne do, phir Chrome → ⋮ →
   **Add to Home screen**. Icon se app bina password khulegi. Link kisi ko mat bhejna.

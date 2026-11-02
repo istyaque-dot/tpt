@@ -14,8 +14,11 @@ from decimal import Decimal, InvalidOperation
 PLATE = re.compile(r"\b([A-Z]{2})[\s\-.]*(\d{1,2})[\s\-.]*([A-Z]{0,3})[\s\-.]*(\d{3,4})\b", re.I)
 NUM = r"(\d{1,3}(?:,\d{2,3})+|\d+(?:\.\d+)?)"
 
-WEIGHT = [re.compile(NUM + r"\s*(?:tons?|tonnes?|mts?|m\.t\.?|t\b|टन)", re.I),
-          re.compile(r"(?:wt|weight|vajan|wajan|वजन)\s*[:=\-]?\s*" + NUM, re.I)]
+WEIGHT = [re.compile(NUM + r"\s*(?:tons?|tonnes?|mts?\b|m\.t\.?|t\b|टन)", re.I),
+          re.compile(r"(?:wt|weight|vajan|wajan|वजन)\s*[:=\-]?\s*" + NUM, re.I),
+          # unit written first: "mt 35", "MT-35", "ton 28"
+          re.compile(r"(?<![a-z])(?:mt|m\.t\.|tons?|tonnes?|टन)\s*[:=\-]?\s*" + NUM, re.I)]
+POINTS = re.compile(r"(?<!\d)(\d)\s*-?\s*(?:points?|pt|पॉइंट)\b", re.I)
 # truck rate needs a rate word ("gaadi bhada 1100", "truck rate 1100", "hire 1100") so that
 # "gaadi 1234" (last digits of the truck number) is never read as a rate
 TRUCK_RATE = re.compile(r"(?:(?:truck|gaadi|gadi|gari|lorry|गाड़ी|गाडी)\s*(?:rate|bhada|bhaada|hire|भाड़ा|भाडा)"
@@ -70,7 +73,7 @@ def parse(text: str, trucks: list[dict] = (), parties: list[dict] = (), places: 
         if no in by_no:
             out["truck_id"] = by_no[no]["id"]
         else:
-            out["notes"].append(f"Truck {no} is not in Masters — add it with ➕ New truck.")
+            out["notes"].append(f"Naya truck {no} — Save karte hi apne aap ban jaayega.")
     else:   # only last 4 digits written ("gaadi 1234")
         for d in re.findall(r"(?<!\d)(\d{4})(?!\d)", t):
             cands = [x for x in trucks if x["truck_no"].endswith(d)]
@@ -158,6 +161,11 @@ def parse(text: str, trucks: list[dict] = (), parties: list[dict] = (), places: 
     mats = _find_known(tl, list(materials))
     if mats:
         out["material"] = mats[0][1]
+
+    # ---- unloading points ----
+    pm = POINTS.search(t)
+    if pm:
+        out["points"] = int(pm.group(1))
 
     # ---- GR / advance / mobile ----
     g = GR.search(t)

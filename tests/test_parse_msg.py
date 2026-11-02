@@ -58,8 +58,16 @@ def test_hindi():
 def test_unknown_truck_and_missing():
     r = p("GJ01XY9999 to Indore")
     assert r["truck_no"] == "GJ01XY9999" and "truck_id" not in r
-    assert any("not in Masters" in n for n in r["notes"]) and any("weight" in n for n in r["notes"])
+    assert any("Naya truck" in n for n in r["notes"]) and any("weight" in n for n in r["notes"])
     assert r["to_place"] == "Indore"
+
+
+def test_real_message_unit_first_and_points():
+    r = parse("UP70FT7739 Kashipur to Sultanpur 2point mt 35 Rate 175  Driver no +919005899224", [], [], [], [])
+    assert r["truck_no"] == "UP70FT7739" and r["from_place"] == "Kashipur" and r["to_place"] == "Sultanpur"
+    assert r["weight"] == Dec("35") and r["points"] == 2 and r["mobile"] == "9005899224"
+    assert Dec("175") in (r.get("party_rate"), r.get("truck_rate"))
+    assert parse("RJ14AB1234 25 mt Jaipur to Kota", [], [], [], [])["weight"] == Dec("25")
 
 
 if __name__ == "__main__":

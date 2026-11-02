@@ -289,16 +289,25 @@ def documents_block(trip: dict, key: str, show_list: bool = True):
 
 
 def upload_widget(trip: dict, key: str, doc_type: str | None = None, label: str | None = None):
-    """File picker (phone camera or gallery) + Upload button. doc_type fixed -> no type choice shown."""
-    if not drive.configured():
+    """File picker (phone camera or gallery) + Upload button. doc_type fixed -> no type choice shown.
+    Without Google Drive the photo can still be READ by AI (nothing is stored)."""
+    from core import ai
+    has_drive = drive.configured()
+    if not has_drive and not ai.configured():
         st.warning("Google Drive is not connected yet. See README → Google Drive setup.")
         return
+    if not has_drive:
+        st.caption("Google Drive abhi juda nahi — photo save nahi hogi, sirf AI se padh sakte ho.")
     if doc_type is None:
         doc_type = st.radio("Document", ["POD", "GR", "OTHER"], horizontal=True, key=f"{key}_type")
     n = st.session_state.get(f"{key}_n", 0)   # changes after each upload so the picker clears
     files = st.file_uploader(label or f"{doc_type} photo / PDF (camera or gallery, many at once)",
                              accept_multiple_files=True,
                              type=["jpg", "jpeg", "png", "pdf", "webp"], key=f"{key}_files_{n}")
+    if files and ai.configured() and doc_type in ("GR", "POD"):
+        ai_reader(trip, files[0], doc_type, f"{key}_ai_{n}")
+    if not has_drive:
+        return
     if st.button(f"⬆ Upload {doc_type}", type="primary", key=f"{key}_upload", disabled=not files,
                  use_container_width=True):
         with st.spinner("Uploading to Google Drive..."):
@@ -311,3 +320,54 @@ def upload_widget(trip: dict, key: str, doc_type: str | None = None, label: str 
             msg += " · POD marked received"
         st.session_state[f"{key}_n"] = n + 1
         _done(msg)
+
+
+def ai_reader(trip: dict, f, doc_type: str, key: str):
+    """🤖 Read a GR / POD photo and offer to put what it found into the trip (user confirms)."""
+    from core import ai
+    if st.button(f"🤖 AI se {doc_type} padho (GR No. / weight bharo)", key=f"{key}_go", use_container_width=True):
+        try:
+            with st.spinner("AI photo padh raha hai..."):
+                st.session_state[key] = ai.read_document(f.getvalue(), f.type or "image/jpeg")
+        except ai.AIError as e:
+            st.error(str(e))
+    d = st.session_state.get(key)
+    if not d:
+        return
+    with st.container(border=True):
+        st.markdown("**🤖 AI ne padha:** " + " · ".join(x for x in (
+            f"{d.get('doc_type') or ''}", f"GR {d['gr_no']}" if d.get("gr_no") else "",
+            f"Truck {d['truck_no']}" if d.get("truck_no") else "",
+            f"Wt {d['weight_ton']} T" if d.get("weight_ton") else "",
+            f"Unloaded {d['unloaded_weight_ton']} T" if d.get("unloaded_weight_ton") else "",
+            d.get("shortage_note") or "", "✅ receiving stamp" if d.get("received_stamp") else "") if x))
+        if d.get("truck_no") and trip.get("truck_no") and d["truck_no"] != trip["truck_no"]:
+            st.warning(f"⚠️ Photo par truck {d['truck_no']} hai, lekin trip {trip['truck_no']} ki hai. "
+                       "Kahin galat trip to nahi?")
+        lk = trip.get("locks") or {}
+        opts = {}
+        if d.get("gr_no") and calc.normalize_gr(d["gr_no"]) != (trip.get("gr_no") or ""):
+            opts["gr"] = st.checkbox(f"GR No. {d['gr_no']} trip mein bharo"
+                                     + (f" (abhi {trip['gr_no']})" if trip.get("gr_no") else ""),
+                                     value=not trip.get("gr_no"), key=f"{key}_gr")
+        if d.get("unloaded_weight_ton") and not lk.get("weights") and calc.D(trip.get("unloaded_weight")) == 0:
+            opts["uw"] = st.checkbox(f"Unloaded weight {d['unloaded_weight_ton']} T bharo", value=True, key=f"{key}_uw")
+        if not opts:
+            st.caption("Trip mein bharne layak kuch naya nahi mila.")
+            return
+        if st.button("✅ Trip mein bharo", key=f"{key}_apply", use_container_width=True):
+            data = {}
+            if opts.get("gr"):
+                data.update(gr_no=d["gr_no"], gr_date=trip.get("gr_date") or clock.today())
+            if opts.get("uw"):
+                data.update(unloaded_weight=d["unloaded_weight_ton"], unloading_date=trip.get("unloading_date")
+                            or clock.today())
+            if data:
+                try:
+                    trips.update_trip(trip["id"], data)
+                    st.session_state.pop(key, None)
+                    _done("AI wali details trip mein bhar di")
+                except psycopg2.errors.UniqueViolation:
+                    st.error(f"GR No. {d['gr_no']} pehle se kisi aur trip mein hai.")
+                except ValueError as e:
+                    st.error(str(e))

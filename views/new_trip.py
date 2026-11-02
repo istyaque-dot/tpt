@@ -5,7 +5,7 @@ No st.form, so hire / freight / margin update live while typing."""
 import psycopg2
 import streamlit as st
 
-from core import calc, clock, db, forms, nav, parse_msg, trips, ui
+from core import ai, calc, clock, db, forms, nav, trips, ui
 
 st.markdown("### ➕ New Trip")
 
@@ -42,14 +42,45 @@ places, materials = db.lookups("PLACE"), db.lookups("MATERIAL")
 
 # ---------- paste a WhatsApp / SMS message -> fill the form ----------
 pf = st.session_state.get("nt_prefill") or {}
-with st.expander("📋 Paste message — app fills the form", expanded=not pf):
+with st.expander("📋 Paste message / 📷 GR photo — app fills the form" + (" 🤖" if ai.configured() else ""),
+                 expanded=not pf):
     msg = st.text_area("Booking message", key=f"nt_msg_{n}", height=110, label_visibility="collapsed",
-                       placeholder="e.g. RJ14AB1234 Jaipur se Delhi 25 ton party rate 1200 gaadi bhada 1100 "
-                                   "ABC Cement GR 4521 adv 10000")
+                       placeholder="e.g. UP70FT7739 Kashipur to Sultanpur 2point mt 35 Rate 175 Driver no 9005899224")
     if st.button("✨ Fill from message", type="primary", use_container_width=True, disabled=not msg.strip()):
-        st.session_state["nt_prefill"] = parse_msg.parse(msg, trucks_, parties, places, materials)
+        with st.spinner("Padh raha hoon..."):
+            st.session_state["nt_prefill"] = ai.parse_message_safe(msg, trucks_, parties, places, materials)
         st.session_state["nt_n"] = n + 1          # fresh form so the found values show up
         st.rerun()
+    if ai.configured():
+        gr_photo = st.file_uploader("…ya GR / bilty ki photo (AI padhega)", type=["jpg", "jpeg", "png", "webp", "pdf"],
+                                    key=f"nt_grphoto_{n}")
+        if gr_photo and st.button("🤖 Fill from GR photo", use_container_width=True):
+            try:
+                with st.spinner("AI photo padh raha hai..."):
+                    d = ai.read_document(gr_photo.getvalue(), gr_photo.type)
+                filled = {"notes": [], "source": "AI photo"}
+                if d.get("truck_no"):
+                    filled["truck_no"] = d["truck_no"]
+                    hit = trips.find_truck(d["truck_no"], trucks_)
+                    if hit:
+                        filled["truck_id"] = hit["id"]
+                for k_src, k_dst in (("from_place", "from_place"), ("to_place", "to_place"), ("material", "material"),
+                                     ("gr_no", "gr_no")):
+                    if d.get(k_src):
+                        filled[k_dst] = d[k_src]
+                if d.get("weight_ton"):
+                    filled["weight"] = d["weight_ton"]
+                p = ai._match_name(d.get("consignor") or "", parties) or ai._match_name(d.get("consignee") or "",
+                                                                                       parties)
+                if p:
+                    filled["party_id"], filled["party_name"] = p["id"], p["name"]
+                filled["notes"].append("Photo se bhara — rates khud likho, aur sab check karo.")
+                st.session_state["nt_prefill"] = filled
+                st.session_state["nt_gr_file"] = (gr_photo.name, gr_photo.getvalue(), gr_photo.type)
+                st.session_state["nt_n"] = n + 1
+                st.rerun()
+            except ai.AIError as e:
+                st.error(str(e))
 if pf:
     found = [f"🚚 {pf['truck_no']}" if pf.get("truck_no") else "",
              f"📍 {pf.get('from_place', '')} → {pf['to_place']}" if pf.get("to_place") else "",
@@ -59,7 +90,8 @@ if pf:
              f"🏢 {pf['party_name']}" if pf.get("party_name") else "",
              f"GR {pf['gr_no']}" if pf.get("gr_no") else "",
              f"Adv ₹{pf['advance']}" if pf.get("advance") else ""]
-    st.success("Message se bhara: " + " · ".join(x for x in found if x) + " — check karke Save karo.")
+    src = {"AI": "🤖 AI ne", "AI photo": "🤖 AI ne photo se"}.get(pf.get("source"), "Message se")
+    st.success(f"{src} bhara: " + " · ".join(x for x in found if x) + " — check karke Save karo.")
     for note in pf.get("notes", []):
         st.warning(note)
     if st.button("✖ Clear filled values", use_container_width=True):
@@ -138,7 +170,8 @@ with c2:
 # 7-8. GR + comment
 gr_no = st.text_input("7. GR No. (if available)", key=K("gr"), placeholder="Can add later",
                       value=pf.get("gr_no") or "")
-_note = " · ".join(x for x in (f"Adv {pf['advance']}" if pf.get("advance") else "",
+_note = " · ".join(x for x in (f"{pf['points']} point" if pf.get("points") else "",
+                               f"Adv {pf['advance']}" if pf.get("advance") else "",
                                f"Driver {pf['mobile']}" if pf.get("mobile") else "") if x)
 remarks = st.text_area("8. Comment / note to remember", key=K("note"), height=80, value=_note,
                        placeholder="e.g. driver will call at unloading, party wants POD original")
@@ -184,8 +217,16 @@ if st.button("💾 Save trip", type="primary", use_container_width=True):
             st.session_state["_last_from"] = from_place.strip()
         st.session_state.pop("nt_new_party", None)
         st.session_state["last_new_trip"] = tid
+        grf = st.session_state.pop("nt_gr_file", None)
+        if grf:
+            from core import drive
+            if drive.configured():
+                try:
+                    drive.upload(trips.get_trip(tid), "GR", grf[0], grf[1], grf[2], st.session_state.get("user", "admin"))
+                except Exception as e:  # trip is saved; only the copy failed
+                    st.session_state["nt_gr_err"] = f" · GR copy upload nahi hui: {e}"
         st.session_state["nt_msg_advance"] = pf.get("advance")
         st.session_state.pop("nt_prefill", None)
         st.session_state["nt_n"] = n + 1
-        ui.flash(f"Trip saved: {trips.get_trip(tid)['trip_no']}")
+        ui.flash(f"Trip saved: {trips.get_trip(tid)['trip_no']}" + st.session_state.pop("nt_gr_err", ""))
         st.rerun()

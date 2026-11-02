@@ -43,6 +43,21 @@ else:
     st.warning("Not connected. Add [google_drive] keys in Streamlit secrets (see README).")
 
 st.divider()
+st.subheader("🤖 AI (Google Gemini)")
+from core import ai  # noqa: E402
+if ai.configured():
+    st.caption("AI juda hai: message padhna, GR/POD photo padhna, scanned POD ko GR-wise kaatna. "
+               "AI kabhi khud Save nahi karta. Free plan mein Google data ko apne AI sudhaarne mein use kar sakta hai.")
+    if st.button("Test AI"):
+        try:
+            st.success(f"AI chal raha hai: {ai.test()}")
+        except ai.AIError as e:
+            st.error(str(e))
+else:
+    st.info("AI band hai. aistudio.google.com → Get API key → Streamlit Secrets mein sabse upar "
+            "`GEMINI_API_KEY = \"...\"` daalo. Bina AI ke bhi app purane tareeke se chalti rahegi.")
+
+st.divider()
 st.subheader("Backup")
 st.caption("Download everything (all tables) as one zip of CSV files. Keep a copy every week on your computer / "
            "Google Drive — the free Supabase plan has no automatic restore.")

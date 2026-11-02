@@ -5,7 +5,7 @@ from core import clock, db, drive, trips, ui
 
 st.markdown("### 📄 GR / POD Documents")
 
-SECTIONS = ["🧾 Fill GR No.", "⬆ Bulk upload (GR-wise files)", "📋 Missing documents"]
+SECTIONS = ["🧾 Fill GR No.", "🤖 Scanned POD (AI kaatega)", "⬆ Bulk upload (GR-wise files)", "📋 Missing documents"]
 sel = st.pills("Section", SECTIONS, default=SECTIONS[0], key="dsec", label_visibility="collapsed") or SECTIONS[0]
 
 if sel == SECTIONS[0]:
@@ -44,6 +44,64 @@ if sel == SECTIONS[0]:
                     st.rerun()
 
 if sel == SECTIONS[1]:
+    from core import ai
+    st.markdown("Saare POD ek saath scan karke **ek PDF** daalo (har page par GR No. likha ho). "
+                "AI har page ka GR No. padhega, PDF ko GR-wise kaatega, aur har trip mein uski POD jod dega.")
+    if not ai.configured():
+        st.warning("AI key nahi hai — Streamlit Secrets mein GEMINI_API_KEY daalo.")
+    if not drive.configured():
+        st.warning("Google Drive juda nahi hai — kaati hui POD save karne ke liye Drive chahiye.")
+    m = st.session_state.get("sp_n", 0)
+    pdf = st.file_uploader("Scanned POD PDF (50–100 page tak ek baar mein)", type=["pdf"], key=f"sp_pdf_{m}")
+    if pdf and st.button("🤖 GR-wise padho", type="primary", use_container_width=True, disabled=not ai.configured()):
+        import io
+
+        from pypdf import PdfReader
+        try:
+            n_pages = len(PdfReader(io.BytesIO(pdf.getvalue())).pages)
+            with st.spinner(f"AI {n_pages} page padh raha hai... (1–2 minute)"):
+                groups = ai.group_pages(ai.map_bundle(pdf.getvalue()), n_pages)
+            st.session_state["sp_groups"] = groups
+            st.session_state["sp_name"] = pdf.name
+        except ai.AIError as e:
+            st.error(str(e))
+    groups = st.session_state.get("sp_groups")
+    if pdf and groups:
+        gr_map = {drive.match_key(t["gr_no"]): t
+                  for t in trips.load_trips("not t.is_cancelled and t.gr_no is not null", None, "t.id")}
+        import pandas as pd
+        df = pd.DataFrame([{"Upload": bool(g["gr_no"]) and drive.match_key(g["gr_no"]) in gr_map,
+                            "GR No.": g["gr_no"], "Pages": ", ".join(map(str, g["pages"])),
+                            "Trip": (gr_map.get(drive.match_key(g["gr_no"])) or {}).get("trip_no", "❌ nahi mila"),
+                            "Truck": (gr_map.get(drive.match_key(g["gr_no"])) or {}).get("truck_no", ""),
+                            "AI sure": "✅" if g["sure"] else "⚠️ check"} for g in groups])
+        st.caption("GR No. galat padha ho to table mein theek karo. '❌ nahi mila' = us GR ki trip nahi hai "
+                   "(pehle trip mein GR No. bharo).")
+        ed = st.data_editor(df, hide_index=True, use_container_width=True, key=f"sp_ed_{m}",
+                            disabled=["Pages", "Trip", "Truck", "AI sure"],
+                            column_config={"Upload": st.column_config.CheckboxColumn("✓")})
+        todo = []
+        for i, r in ed.iterrows():
+            t = gr_map.get(drive.match_key(str(r["GR No."] or "")))
+            if r["Upload"] and t:
+                todo.append((t, groups[i]["pages"]))
+        if st.button(f"⬆ {len(todo)} POD trips mein jodo", type="primary", use_container_width=True,
+                     disabled=not todo or not drive.configured()):
+            mark = db.setting_bool("pod_upload_marks_received")
+            bar = st.progress(0.0)
+            for k, (t, pages) in enumerate(todo, 1):
+                part = ai.split_pdf(pdf.getvalue(), pages)
+                drive.upload(t, "POD", f"POD_{t['gr_no']}.pdf", part, "application/pdf",
+                             st.session_state.get("user", "admin"))
+                if mark and not t["pod_received"]:
+                    trips.update_trip(t["id"], {"pod_received": True, "pod_date": clock.today()})
+                bar.progress(k / len(todo), text=f"{k}/{len(todo)}")
+            st.session_state.pop("sp_groups", None)
+            st.session_state["sp_n"] = m + 1
+            ui.flash(f"{len(todo)} POD trips mein jud gayi")
+            st.rerun()
+
+if sel == SECTIONS[2]:
     st.markdown(
         "Upload many files at once. **File name = GR No.** — e.g. `4521.pdf`, `GR-4521.pdf`, "
         "`4521_POD.pdf`. The app finds the trip by GR No. and saves each file in that trip's Drive folder.\n\n"
@@ -96,7 +154,7 @@ if sel == SECTIONS[1]:
             st.session_state["bulk_n"] = n + 1
             st.success(f"{done} file(s) uploaded." + (f" {len(pod_trips)} trip(s) marked POD received." if mark_pod and pod_trips else ""))
 
-if sel == SECTIONS[2]:
+if sel == SECTIONS[3]:
     rows = trips.load_trips("not t.is_cancelled and t.loaded_weight is not null", None, "t.loading_date")
     need = st.radio("Show trips without", ["POD copy", "GR copy", "GR No."], horizontal=True)
     if need == "POD copy":

@@ -141,6 +141,15 @@ Har payment entry mein Trip No. link hoga (pump payment aur contra ko chhodkar).
 7. **GR ke bina truck balance**: by default allowed; Settings mein "GR zaroori" on kar sakte hain.
 8. **POD upload**: by default POD copy upload hote hi trip "POD received" ho jaati hai (Settings mein band kar sakte hain).
 
+## AI (Google Gemini free key) — Nov 2026
+- Secrets mein `GEMINI_API_KEY` ho to AI chalta hai; na ho / limit khatam / error -> purana rule-based reader. Kaam kabhi nahi rukta.
+- **Message**: kisi bhi format ka booking message -> form bharta hai (quintal rate -> ×10 per ton, kai trucks ho to warning,
+  party naam Masters se milaata hai). AI jo chhod de, rule-reader bhar deta hai.
+- **GR photo (New Trip)**: bilty ki photo -> truck, GR, from/to, weight, party. Rate khud bharna hai. Save par photo trip mein jud jaati hai (Drive juda ho to).
+- **GR/POD photo (trip upload)**: GR No. aur unloaded weight padhta hai; truck alag ho to warning; "Trip mein bharo" dabane par hi bharta hai.
+- **Scanned POD PDF**: har page ka haath se likha GR padh kar PDF GR-wise kaat-ta hai; bina GR wala page pichhle GR ka; table mein theek kar sakte ho; phir har trip mein POD judti hai.
+- AI **kabhi khud Save nahi karta**. Hisaab ka logic AI se alag hai.
+
 ## Party TDS (Nov 2026)
 - Party freight dete waqt **TDS (default 1%)** kaat kar deti hai. Har trip mein "Party TDS %" (Settings mein default).
 - TDS = (Freight + Party demurrage) × TDS% — poore rupaye mein round.
