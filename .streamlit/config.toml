@@ -1,16 +1,16 @@
-   [server]
-   maxUploadSize = 200
+[server]
+maxUploadSize = 200
 
-   [client]
-   toolbarMode = "minimal"
+[client]
+toolbarMode = "minimal"        # no Streamlit developer menu for the user
 
-   [browser]
-   gatherUsageStats = false
+[browser]
+gatherUsageStats = false
 
-   [theme]
-   base = "light"
-   primaryColor = "#1f6feb"
-   backgroundColor = "#ffffff"
-   secondaryBackgroundColor = "#f3f6fa"
-   textColor = "#1b2430"
-   font = "sans serif"
+[theme]
+base = "light"
+primaryColor = "#1f6feb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f3f6fa"
+textColor = "#1b2430"
+font = "sans serif"
