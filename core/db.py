@@ -8,10 +8,84 @@ import psycopg2.pool
 import streamlit as st
 
 
+def _db_args() -> dict:
+    """Connection settings from Streamlit Secrets.
+
+    Preferred (no URL mistakes possible, any password works):
+        [database]
+        host = "aws-0-eu-west-1.pooler.supabase.com"
+        port = 6543
+        user = "postgres.<project-code>"
+        password = "..."
+        dbname = "postgres"
+    Old style DB_URL = "postgresql://..." still works."""
+    d = st.secrets.get("database")
+    if d:
+        missing = [k for k in ("host", "user", "password") if not str(d.get(k, "")).strip()]
+        if missing:
+            _stop_with_help(f"Secrets ke [database] mein ye khaali hai: {', '.join(missing)}.")
+        return {"host": str(d["host"]).strip(), "port": int(d.get("port", 6543)),
+                "user": str(d["user"]).strip(), "password": str(d["password"]),
+                "dbname": str(d.get("dbname", "postgres")).strip(), "sslmode": "require",
+                "connect_timeout": 10}
+    url = str(st.secrets.get("DB_URL", "")).strip()
+    if not url:
+        _stop_with_help("Streamlit Secrets mein [database] (ya DB_URL) nahi mila.")
+    return {"dsn": url, "connect_timeout": 10}
+
+
+def _password() -> str:
+    d = st.secrets.get("database")
+    if d:
+        return str(d.get("password", ""))
+    try:
+        return str(st.secrets.get("DB_URL", "")).split("://", 1)[1].rsplit("@", 1)[0].split(":", 1)[1]
+    except Exception:
+        return ""
+
+
+def _stop_with_help(reason: str):
+    """Plain-language database error on screen (never shows the password)."""
+    st.error("**Database se connect nahi ho pa raha.**\n\n" + reason)
+    st.stop()
+
+
+def _explain(e: Exception) -> str:
+    msg = str(e)
+    low = msg.lower()
+    hints = []
+    if "password authentication failed" in low:
+        hints.append("❌ **Password galat hai.** Supabase → Connect → *Reset database password* se naya password "
+                     "banao (sirf akshar + number) aur DB_URL mein `postgres.xxxx:` ke baad wahi likho.")
+    if "tenant or user not found" in low:
+        hints.append("❌ **User ya host galat hai.** User `postgres.<project-code>` hona chahiye (sirf `postgres` nahi) "
+                     "aur host bilkul wahi jo Supabase ke *Shared pooler* mein dikhta hai (aws-0-… ya aws-1-…).")
+    if "could not translate host name" in low or "name or service not known" in low:
+        hints.append("❌ **Host ka naam galat hai** — DB_URL mein `@` ke baad ka hissa Supabase se dobara copy karo. "
+                     "Agar password mein `@ # / : ?` hai to bhi ye error aata hai — password badlo.")
+    if "network is unreachable" in low or "cannot assign requested address" in low:
+        hints.append("❌ **Direct connection wala link laga hai.** Supabase → Connect → *Shared / Transaction pooler* "
+                     "wala link lo (`pooler.supabase.com:6543`).")
+    if "timeout" in low or "timed out" in low:
+        hints.append("⏳ **Database jawab nahi de raha.** Supabase project *Paused* to nahi? Dashboard par "
+                     "*Restore project* dabao, 2 minute ruko, phir app *Reboot* karo.")
+    pw = _password()
+    if pw.strip().lower() in ("[your-password]", "your-password", "apna-db-password", "") or "[" in pw:
+        hints.insert(0, "❌ Password ki jagah abhi bhi `[YOUR-PASSWORD]` / `APNA-DB-PASSWORD` ya `[ ]` likha hai.")
+    if pw != pw.strip():
+        hints.insert(0, "❌ Password ke aage/peeche **space** hai — hata do.")
+    if not hints:
+        hints.append("Neeche likha error screenshot bhejo.")
+    safe = msg.replace(pw, "****") if pw else msg
+    return "\n\n".join(hints) + f"\n\n`{safe.strip()[:300]}`"
+
+
 @st.cache_resource(show_spinner=False)
 def _pool():
-    return psycopg2.pool.ThreadedConnectionPool(1, 5, dsn=st.secrets["DB_URL"],
-                                                connect_timeout=10)
+    try:
+        return psycopg2.pool.ThreadedConnectionPool(1, 5, **_db_args())
+    except psycopg2.OperationalError as e:
+        _stop_with_help(_explain(e))
 
 
 @contextmanager
@@ -66,7 +140,7 @@ class _RetryCursor:
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             if not self._first:
                 raise
-            self.conn = psycopg2.connect(st.secrets["DB_URL"], connect_timeout=10)
+            self.conn = psycopg2.connect(**_db_args())
             self._cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             self._cur.execute(sql, params)
         self._first = False
