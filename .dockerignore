@@ -1,0 +1,6 @@
+.git
+__pycache__/
+tests/
+*.zip
+client_secret*.json
+.streamlit/secrets.toml
