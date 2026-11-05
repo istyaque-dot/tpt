@@ -114,7 +114,7 @@ a = calc.trip_amounts(preview)
 
 # ---------- 3. final hisaab ----------
 st.markdown("#### 3. Final hisaab")
-lines = [("Truck hire", f"{a['billing_weight']} T × ₹{t['truck_rate']}", a["truck_hire"], "+"),
+lines = [("Truck hire", calc.rate_text(a["billing_weight"], t["truck_rate"], db.rate_unit()), a["truck_hire"], "+"),
          ("Demurrage", f"{days} day(s)" if days else "", a["truck_demurrage"], "+"),
          ("Advance paid", "", a["truck_paid"], "−"),
          ("Diesel", "", a["diesel"], "−"),

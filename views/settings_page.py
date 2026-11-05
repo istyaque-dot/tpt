@@ -12,6 +12,14 @@ with st.form("settings"):
                           value=float(s.get("default_tds_rate", "1") or 0),
                           help="Har nayi trip mein ye % pehle se bhara aayega; trip mein badal sakte ho.")
     st.caption("Commission har trip mein haath se ₹ mein likha jaata hai.")
+    unit = st.radio("Rate kis hisaab se likhte ho", ["QUINTAL", "TON"], horizontal=True,
+                    index=0 if (s.get("rate_unit", "QUINTAL") or "QUINTAL").upper() == "QUINTAL" else 1,
+                    format_func=lambda x: "₹ per quintal" if x == "QUINTAL" else "₹ per ton",
+                    help="Sirf likhne/dikhane ka tareeka. Hisaab andar per ton hi rehta hai (1 ton = 10 quintal), "
+                         "isliye badalne se purani trips ka paisa nahi badalta.")
+    mrf = st.radio("Paste kiye message mein rate kiska hota hai", ["TRUCK", "PARTY"], horizontal=True,
+                   index=0 if (s.get("message_rate_for", "TRUCK") or "TRUCK").upper() == "TRUCK" else 1,
+                   format_func=lambda x: "Truck ka bhada" if x == "TRUCK" else "Party freight")
     basis = st.selectbox("Freight & hire charged on", ["LOADED", "UNLOADED"],
                          index=0 if s.get("freight_basis", "LOADED") == "LOADED" else 1,
                          format_func=lambda x: f"{x.title()} weight")
@@ -23,7 +31,8 @@ with st.form("settings"):
     root = st.text_input("Google Drive main folder name", value=s.get("drive_root_folder_name", "Transport Docs"),
                          help="Change this only before the first upload.")
     if st.form_submit_button("Save settings", type="primary"):
-        for k, v in {"company_name": company, "default_tds_rate": tds, "freight_basis": basis,
+        for k, v in {"company_name": company, "default_tds_rate": tds, "rate_unit": unit,
+                     "message_rate_for": mrf, "freight_basis": basis,
                      "require_gr_for_truck_balance": str(req_gr).lower(),
                      "pod_upload_marks_received": str(pod_auto).lower(),
                      "drive_root_folder_name": root.strip() or "Transport Docs"}.items():

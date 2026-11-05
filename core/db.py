@@ -199,6 +199,16 @@ def setting_bool(key: str) -> bool:
     return str(setting(key, "false")).lower() == "true"
 
 
+def message_rate_for() -> str:
+    """Whose rate a booking message carries when it does not say: TRUCK (default) or PARTY."""
+    return (setting("message_rate_for", "TRUCK") or "TRUCK").upper()
+
+
+def rate_unit() -> str:
+    """QUINTAL (default) or TON — how rates are typed and shown."""
+    return (setting("rate_unit", "QUINTAL") or "QUINTAL").upper()
+
+
 def save_setting(key: str, value):
     execute("insert into settings(key, value) values (%s, %s) "
             "on conflict (key) do update set value = excluded.value", (key, str(value)))

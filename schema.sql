@@ -14,6 +14,8 @@ insert into settings (key, value) values
     ('default_commission_type',      'FIXED'),      -- FIXED (Rs per trip) or PERCENT (of truck hire)
     ('default_commission_value',     '0'),
     ('default_tds_rate',             '1'),        -- % TDS the party deducts from freight
+    ('rate_unit',                    'QUINTAL'),  -- rates typed/shown per QUINTAL or TON (stored per ton)
+    ('message_rate_for',             'TRUCK'),    -- a pasted message's single rate is the TRUCK rate
     ('freight_basis',                'LOADED'),     -- LOADED or UNLOADED weight
     ('require_gr_for_truck_balance', 'false'),      -- GR No. must be filled before truck balance payment
     ('pod_upload_marks_received',    'true'),       -- uploading a POD copy ticks "POD received"

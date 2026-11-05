@@ -31,13 +31,14 @@ def trip_check(t: dict) -> list[dict]:
                      "OK": "✅" if abs(expected - actual) < calc.Decimal("0.01") else "❌"})
 
     w = t["billing_weight"]
-    row("Party bill (freight + demurrage)", f"{w} T × {t['party_rate']} + {t['party_demurrage']}",
+    RU = db.rate_unit()
+    row("Party bill (freight + demurrage)", f"{calc.rate_text(w, t['party_rate'], RU)} + {t['party_demurrage']}",
         t["party_freight"] + t["party_demurrage"],
         sum((calc.D(r["debit"]) for r in db.query(
             "select debit from v_ledger where trip_id=%s and v_type='TRIP' and account_id=%s",
             (t["id"], t["party_id"]))), calc.ZERO))
     if t.get("owner_id"):
-        row("Truck hire + demurrage", f"{w} T × {t['truck_rate'] or 0} + {t['truck_demurrage']}",
+        row("Truck hire + demurrage", f"{calc.rate_text(w, t['truck_rate'] or 0, RU)} + {t['truck_demurrage']}",
             t["truck_hire"] + t["truck_demurrage"],
             sum((calc.D(r["credit"]) for r in db.query(
                 "select credit from v_ledger where trip_id=%s and v_type='TRIP' and account_id=%s",

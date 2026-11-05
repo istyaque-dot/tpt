@@ -97,6 +97,7 @@ with st.expander("✏️ Edit trip details", expanded=t["status"] in ("Booked", 
         materials.append(t["material"])
 
     d_truck, d_party, d_wt = dis or lk["truck"], dis or lk["party"], dis or lk["weights"]
+    RU = db.rate_unit()
     with st.form(f"edit_{t['id']}"):
         c1, c2 = st.columns(2)
         truck_txt = c1.text_input("1. Truck No.", value=t.get("truck_no") or "", disabled=d_truck,
@@ -111,9 +112,13 @@ with st.expander("✏️ Edit trip details", expanded=t["status"] in ("Booked", 
                                      format="DD/MM/YYYY", disabled=d_wt)
         c1, c2 = st.columns(2)
         with c1:
-            truck_rate = num("4. Truck rate ₹/ton", f"e_tr_{t['id']}", t["truck_rate"], disabled=d_truck)
+            truck_rate = calc.rate_store(num(f"4. Truck rate {calc.rate_label(RU)}", f"e_tr_{t['id']}",
+                                             calc.rate_show(t["truck_rate"], RU) if t["truck_rate"] else None,
+                                             1.0, disabled=d_truck), RU)
         with c2:
-            party_rate = num("5. Freight ₹/ton", f"e_pr_{t['id']}", t["party_rate"], disabled=d_party)
+            party_rate = calc.rate_store(num(f"5. Freight {calc.rate_label(RU)}", f"e_pr_{t['id']}",
+                                             calc.rate_show(t["party_rate"], RU) if t["party_rate"] else None,
+                                             1.0, disabled=d_party), RU)
         party_id = st.selectbox("6. Freight paid by (company)", pids, format_func=pn.get, disabled=d_party,
                                 index=pids.index(t["party_id"]) if t["party_id"] in pids else None)
         c1, c2 = st.columns(2)

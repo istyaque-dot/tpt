@@ -32,7 +32,7 @@ def test_message_quintal_and_party_match():
     r = ai.parse_message("x", TRUCKS, PARTIES)
     assert r["truck_no"] == "UP70FT7739" and "truck_id" not in r
     assert r["from_place"] == "Kashipur" and r["to_place"] == "Sultanpur" and r["weight"] == Dec("35")
-    assert r["party_rate"] == Dec("1750") and r["party_id"] == 10 and r["mobile"] == "9005899224"
+    assert r["truck_rate"] == Dec("1750") and r["party_id"] == 10 and r["mobile"] == "9005899224"
     assert r["points"] == 2 and any("UP70AB1111" in n for n in r["notes"])
     assert any("quintal" in n for n in r["notes"])
 
@@ -42,6 +42,22 @@ def test_labelled_rates_and_existing_truck():
           "rate_unit": "ton"})
     r = ai.parse_message("x", TRUCKS, PARTIES)
     assert r["truck_id"] == 1 and r["party_rate"] == Dec("1200") and r["truck_rate"] == Dec("1100")
+
+
+def test_unknown_unit_uses_default_quintal():
+    fake({"truck_no": "UP70FT7739", "to_place": "Sultanpur", "weight_ton": 35, "rate": 175, "rate_unit": "unknown"})
+    assert ai.parse_message("x", [], [], default_unit="QUINTAL")["truck_rate"] == Dec("1750")
+    assert ai.parse_message("x", [], [], default_unit="TON")["truck_rate"] == Dec("175")
+    assert ai.parse_message("x", [], [], default_unit="TON", single_rate_for="PARTY")["party_rate"] == Dec("175")
+
+
+def test_ai_many_trucks_with_rule_gap_fill():
+    fake({"trips": [{"truck_no": "UP70FT7739", "to_place": "Sultanpur", "weight_ton": 35, "rate": 175},
+                    {"truck_no": "UP22AB1234", "to_place": "Sultanpur", "rate": 175}]})
+    rs = ai.parse_many_safe("Kashipur to Sultanpur rate 175\nUP70FT7739 mt 35\nUP22AB1234 mt 30", [], [], [], [],
+                            default_unit="QUINTAL")
+    assert [r["truck_no"] for r in rs] == ["UP70FT7739", "UP22AB1234"]
+    assert rs[0]["truck_rate"] == Dec("1750") and rs[1]["weight"] == Dec("30")   # AI missed it; rules filled
 
 
 def test_fallback_to_rules_when_ai_fails():

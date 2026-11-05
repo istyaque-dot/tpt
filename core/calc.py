@@ -284,6 +284,31 @@ def receipt_purpose(trip: dict, amount) -> str:
     return "ADVANCE"
 
 
+# ---------- rate unit (how rates are TYPED and SHOWN; always STORED per ton) ----------
+# 1 ton = 10 quintal, so ₹175/quintal = ₹1,750/ton.
+
+def rate_show(rate_per_ton, unit: str) -> Decimal:
+    v = D(rate_per_ton)
+    return v / 10 if (unit or "").upper() == "QUINTAL" else v
+
+
+def rate_store(shown, unit: str) -> Decimal:
+    v = D(shown)
+    return r2(v * 10) if (unit or "").upper() == "QUINTAL" else r2(v)
+
+
+def rate_label(unit: str) -> str:
+    return "₹/qtl" if (unit or "").upper() == "QUINTAL" else "₹/ton"
+
+
+def rate_text(weight_ton, rate_per_ton, unit: str) -> str:
+    """'350 qtl × ₹175' or '35 T × ₹1750' for statements and hisaab lines."""
+    w = D(weight_ton)
+    if (unit or "").upper() == "QUINTAL":
+        return f"{(w * 10).normalize():f} qtl × ₹{rate_show(rate_per_ton, unit).normalize():f}"
+    return f"{w.normalize():f} T × ₹{D(rate_per_ton).normalize():f}"
+
+
 def route(t: dict) -> str:
     """'Jaipur → Delhi', or just 'Delhi' when From is not filled."""
     frm, to = (t.get("from_place") or "").strip(), (t.get("to_place") or "").strip()

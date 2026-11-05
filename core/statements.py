@@ -96,9 +96,10 @@ def account_statement(account_id: int, d_from, d_to, side: str) -> dict:
                       if (t["party_balance"] if side == "PARTY" else t["truck_balance"]) > calc.SETTLED_TOLERANCE]
         if side == "PARTY":
             rows_ = [[t["truck_no"] or "", t.get("gr_no") or "", f"{t['loading_date']:%d/%m/%y}" if t.get("loading_date")
-                      else "", t["billing_weight"], t["party_rate"], t["party_freight"] + t["party_demurrage"],
+                      else "", t["billing_weight"], calc.rate_show(t["party_rate"], db.rate_unit()),
+                      t["party_freight"] + t["party_demurrage"],
                       t["party_tds"], t["party_shortage"], t["party_received"], t["party_balance"]] for t in open_trips]
-            cols = ["Truck", "GR", "Loaded", "Wt (T)", "Rate", "Freight+Dem", "TDS", "Shortage", "Received", "Balance"]
+            cols = ["Truck", "GR", "Loaded", "Wt (T)", f"Rate {calc.rate_label(db.rate_unit())}", "Freight+Dem", "TDS", "Shortage", "Received", "Balance"]
             money = {5, 6, 7, 8, 9}
         else:
             rows_ = [[t["truck_no"] or "", t["trip_no"], f"{t['loading_date']:%d/%m/%y}" if t.get("loading_date") else "",
@@ -149,7 +150,8 @@ def trip_statement(trip_id: int) -> dict:
         ("Status", t["status"]),
     ]
     w = t["billing_weight"]
-    truck_calc = [["Truck hire", f"{w} T × {t['truck_rate'] or 0}", t["truck_hire"]]]
+    RU = db.rate_unit()
+    truck_calc = [["Truck hire", calc.rate_text(w, t["truck_rate"] or 0, RU), t["truck_hire"]]]
     if t["truck_demurrage"]:
         truck_calc.append(["+ Demurrage", f"{t.get('demurrage_days') or ''} day(s)".strip(), t["truck_demurrage"]])
     truck_calc += [["− Advance / payments", "", t["truck_paid"]], ["− Diesel", "", t["diesel"]],
@@ -157,7 +159,7 @@ def trip_statement(trip_id: int) -> dict:
                     t["commission"]]]
     if t["truck_shortage"]:
         truck_calc.append(["− Shortage / damage", "", t["truck_shortage"]])
-    party_calc = [["Freight", f"{w} T × {t['party_rate']}", t["party_freight"]]]
+    party_calc = [["Freight", calc.rate_text(w, t["party_rate"], RU), t["party_freight"]]]
     if t["party_demurrage"]:
         party_calc.append(["+ Demurrage", "", t["party_demurrage"]])
     party_calc.append(["− Received", "", t["party_received"]])

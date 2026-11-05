@@ -35,7 +35,7 @@ def test_last_digits_and_unlabelled_rates():
     r = p("gaadi 1234 kota se new delhi 30 tons rate 1250 aur 1150/ton driver 9876543210")
     assert r["truck_id"] == 1                                    # matched by last 4 digits
     assert r["to_place"] == "New Delhi" and r["from_place"] == "Kota"
-    assert r["party_rate"] == Dec("1250") and r["truck_rate"] == Dec("1150")
+    assert r["party_rate"] == Dec("1250") and r["truck_rate"] == Dec("1150")   # two rates: higher = party
     assert r["mobile"] == "9876543210" and r["weight"] == Dec("30")
     assert any("check" in n for n in r["notes"])
 
@@ -68,6 +68,35 @@ def test_real_message_unit_first_and_points():
     assert r["weight"] == Dec("35") and r["points"] == 2 and r["mobile"] == "9005899224"
     assert Dec("175") in (r.get("party_rate"), r.get("truck_rate"))
     assert parse("RJ14AB1234 25 mt Jaipur to Kota", [], [], [], [])["weight"] == Dec("25")
+
+
+def test_quintal_default_and_explicit_ton():
+    msg = "UP70FT7739 Kashipur to Sultanpur 2point mt 35 Rate 175  Driver no +919005899224"
+    r = parse(msg, [], [], [], [], default_unit="QUINTAL")
+    assert r["truck_rate"] == Dec("1750") and "party_rate" not in r and any("quintal" in n for n in r["notes"])
+    assert any("TRUCK ka bhada" in n for n in r["notes"])
+    r = parse("RJ14AB1234 Jaipur to Kota 25 ton rate 1200/ton", [], [], [], [], default_unit="QUINTAL")
+    assert r["truck_rate"] == Dec("1200")                       # message says per ton -> no ×10
+    r = parse("RJ14AB1234 Jaipur to Kota 25 ton rate 120 per qtl", [], [], [], [])
+    assert r["truck_rate"] == Dec("1200")                       # message says quintal even when default is ton
+    r = parse(msg, [], [], [], [], default_unit="QUINTAL", single_rate_for="PARTY")
+    assert r["party_rate"] == Dec("1750") and "truck_rate" not in r
+    r = parse("RJ14AB1234 Jaipur to Kota 25 ton party rate 1200", [], [], [], [])
+    assert r["party_rate"] == Dec("1200")                       # labelled rate still goes to its own box
+
+
+def test_many_trucks_one_message():
+    from core.parse_msg import parse_many
+    msg = "Kashipur to Sultanpur rate 175\nUP70FT7739 mt 35 driver 9005899224\nUP22AB1234 mt 30\nHR55X1234 32 mt"
+    rs = parse_many(msg, [], [], [], [], default_unit="QUINTAL")
+    assert [r["truck_no"] for r in rs] == ["UP70FT7739", "UP22AB1234", "HR55X1234"]
+    assert all(r["to_place"] == "Sultanpur" and r["truck_rate"] == Dec("1750") for r in rs)
+    assert [r["weight"] for r in rs] == [Dec("35"), Dec("30"), Dec("32")]
+    assert rs[0]["mobile"] == "9005899224" and "mobile" not in rs[1]       # driver no. stays with its truck
+    rs = parse_many("UP70FT7739 Kashipur to Sultanpur mt 35 Rate 175\nUP22AB1234 Bazpur to Bemetara mt 30 rate 300",
+                    [], [], [], [], default_unit="QUINTAL")
+    assert rs[1]["to_place"] == "Bemetara" and rs[1]["truck_rate"] == Dec("3000")
+    assert len(parse_many("UP70FT7739 Kashipur to Sultanpur mt 35 Rate 175", [], [], [], [])) == 1
 
 
 if __name__ == "__main__":

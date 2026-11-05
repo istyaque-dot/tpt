@@ -56,9 +56,51 @@ def _find_known(text_l: str, names: list[str]) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
+CARRY = ("from_place", "to_place", "party_id", "party_name", "material", "truck_rate", "party_rate")
+
+
+def parse_many(text: str, trucks: list[dict] = (), parties: list[dict] = (), places: list[str] = (),
+               materials: list[str] = (), default_unit: str = "TON", single_rate_for: str = "TRUCK") -> list[dict]:
+    """Message with several truck numbers -> one result per truck.
+    Text before the first truck no. (and details written once) is shared by all trucks; weight, GR,
+    driver no., advance stay with the truck they are written next to."""
+    raw = text or ""
+    hits = list(PLATE.finditer(raw))
+    seen, starts = set(), []
+    for m in hits:
+        no = _plate_key(*m.groups())
+        if no not in seen:
+            seen.add(no)
+            starts.append(m.start())
+    if len(starts) <= 1:
+        r = parse(raw, trucks, parties, places, materials, default_unit, single_rate_for)
+        return [r] if r.get("truck_no") or r.get("truck_id") or r.get("to_place") else []
+    header = raw[:starts[0]]
+    common = parse(header, trucks, parties, places, materials, default_unit, single_rate_for) if header.strip() else {}
+    results, carry = [], {k: common[k] for k in CARRY if common.get(k)}
+    for i, s0 in enumerate(starts):
+        seg = raw[s0: starts[i + 1] if i + 1 < len(starts) else len(raw)]
+        r = parse(seg, trucks, parties, places, materials, default_unit, single_rate_for)
+        for k in CARRY:                       # shared details: header, else the truck before
+            if not r.get(k) and carry.get(k):
+                r[k] = carry[k]
+        for k in CARRY:
+            if r.get(k):
+                carry[k] = r[k]
+        r["notes"] = [n for n in r["notes"] if not n.startswith(("Not found", "Message ka rate"))]
+        results.append(r)
+    return results
+
+
+UNIT_QTL = re.compile(r"(?:qtl|quintal|quintel|kwintal|क्विंटल|कुंतल|/\s*q\b)", re.I)
+UNIT_TON = re.compile(r"(?:per\s*ton|/\s*ton|/\s*mt\b|\bpmt\b|p\.m\.t|प्रति\s*टन)", re.I)
+
+
 def parse(text: str, trucks: list[dict] = (), parties: list[dict] = (), places: list[str] = (),
-          materials: list[str] = ()) -> dict:
-    """trucks: [{id, truck_no}], parties: [{id, name}]. Returns found values + notes for the user."""
+          materials: list[str] = (), default_unit: str = "TON", single_rate_for: str = "TRUCK") -> dict:
+    """trucks: [{id, truck_no}], parties: [{id, name}]. Returns found values + notes for the user.
+    Rates are always returned PER TON. A message rate is per quintal when the message says so,
+    or when nothing is said and default_unit is QUINTAL (then ×10)."""
     raw = text or ""
     t = " ".join(raw.split())
     tl = t.lower()
@@ -110,10 +152,26 @@ def parse(text: str, trucks: list[dict] = (), parties: list[dict] = (), places: 
             out["party_rate"], out["truck_rate"] = max(loose[:2]), min(loose[:2])
             out["notes"].append("Two rates without labels: higher taken as freight, lower as truck rate — check.")
         elif loose:
-            key = "party_rate" if "party_rate" not in out else "truck_rate"
+            # one rate without a label: whose it is comes from Settings (messages carry the TRUCK rate)
+            first = "truck_rate" if (single_rate_for or "TRUCK").upper() == "TRUCK" else "party_rate"
+            other = "party_rate" if first == "truck_rate" else "truck_rate"
+            key = first if first not in out else other
             out[key] = loose[0]
-            if key == "party_rate" and "truck_rate" not in out:
-                out["notes"].append("One rate found — taken as freight (party rate). Enter truck rate.")
+            if other not in out:
+                out["notes"].append("Message ka rate " + ("TRUCK ka bhada" if key == "truck_rate" else "party freight")
+                                    + " maana hai — " + ("Freight (party rate) khud likho." if key == "truck_rate"
+                                                         else "Truck rate khud likho."))
+
+    # rate unit: message word wins, else the app's default
+    if "party_rate" in out or "truck_rate" in out:
+        unit = "QUINTAL" if UNIT_QTL.search(t) else "TON" if UNIT_TON.search(t) else (default_unit or "TON").upper()
+        if unit == "QUINTAL":
+            for k in ("party_rate", "truck_rate"):
+                if k in out:
+                    out["notes"].append(f"{'Freight' if k == 'party_rate' else 'Truck'} ₹{out[k]}/quintal "
+                                        f"= ₹{out[k] * 10}/ton")
+                    out[k] = out[k] * 10
+        out["rate_unit_seen"] = unit
 
     # ---- route ----
     # 1) "A se B" / "A to B" / "A -> B" decides direction; known places only fix the spelling / multi-word names

@@ -145,7 +145,7 @@ Rules:
 - truck_no: Indian vehicle number, uppercase, no spaces. If several trucks, first in truck_no, rest in other_trucks.
 - "mt 35", "35 MT", "35 ton", "35 टन" = weight_ton 35. Quintal weight -> divide by 10.
 - If two rates are clearly labelled (party/freight/company vs gaadi/truck/bhada/hire) fill party_rate and truck_rate.
-  Otherwise put the single rate in "rate" and say who it is for only if the message says so.
+  Otherwise put the single rate in "rate"; rate_for = "party" or "truck" ONLY if the message says so, else "unknown".
 - "per qtl", "/qtl", "quintal" = rate_unit quintal. "fix", "fixed", "lumpsum" = fixed (total, not per ton).
 - "2point", "2 point" = points 2 (unloading points).
 - driver_mobile: 10 digits without +91.
@@ -154,11 +154,18 @@ Message:
 """
 
 
-def parse_message(text: str, trucks: list[dict], parties: list[dict]) -> dict:
+def parse_message(text: str, trucks: list[dict], parties: list[dict], default_unit: str = "TON",
+                  single_rate_for: str = "TRUCK") -> dict:
     """Same output shape as core.parse_msg.parse (so New Trip can use either)."""
     r = ask_json(MSG_PROMPT + text.strip(), timeout=40)
     if isinstance(r, list):
         r = r[0] if r else {}
+    return _map_one(r, trucks, parties, default_unit, single_rate_for)
+
+
+def _map_one(r: dict, trucks: list[dict], parties: list[dict], default_unit: str = "TON",
+             single_rate_for: str = "TRUCK") -> dict:
+    """One AI trip (raw JSON) -> form values (rates per ton, truck/party matched to Masters)."""
     out: dict = {"notes": [], "source": "AI"}
     tn = calc.normalize_truck_no(r.get("truck_no") or "")
     if tn:
@@ -176,6 +183,8 @@ def parse_message(text: str, trucks: list[dict], parties: list[dict]) -> dict:
     if w and w < 100:
         out["weight"] = w
     unit = r.get("rate_unit")
+    if (unit or "unknown").lower() in ("unknown", "", "none") and (default_unit or "").upper() == "QUINTAL":
+        unit = "quintal"
     for k in ("party_rate", "truck_rate"):
         v, note = _to_per_ton(_num(r.get(k)), unit)
         if v:
@@ -190,14 +199,18 @@ def parse_message(text: str, trucks: list[dict], parties: list[dict]) -> dict:
         if note:
             out["notes"].append(note)
         who = (r.get("rate_for") or "").lower()
-        if who == "truck" and "truck_rate" not in out:
-            out["truck_rate"] = one
-        elif "party_rate" not in out:
-            out["party_rate"] = one
-            if who != "party":
-                out["notes"].append(f"Rate ₹{one}/ton freight (party) maana hai — truck ka ho to badal dena.")
-        elif "truck_rate" not in out:
-            out["truck_rate"] = one
+        if who not in ("party", "truck"):
+            who = "truck" if (single_rate_for or "TRUCK").upper() == "TRUCK" else "party"
+        first = f"{who}_rate"
+        other = "party_rate" if first == "truck_rate" else "truck_rate"
+        if first not in out:
+            out[first] = one
+        elif other not in out:
+            out[other] = one
+        if other not in out:
+            out["notes"].append("Message ka rate " + ("TRUCK ka bhada" if first == "truck_rate" else "party freight")
+                                + " maana hai — " + ("Freight (party rate) khud likho." if first == "truck_rate"
+                                                     else "Truck rate khud likho."))
     p = _match_name(r.get("party_name") or "", parties)
     if p:
         out["party_id"], out["party_name"] = p["id"], p["name"]
@@ -226,15 +239,18 @@ def parse_message(text: str, trucks: list[dict], parties: list[dict]) -> dict:
     return out
 
 
-def parse_message_safe(text: str, trucks, parties, places, materials) -> dict:
-    """AI first; on any problem use the rule-based reader. Rule results fill gaps AI left."""
+def parse_message_safe(text: str, trucks, parties, places, materials, default_unit: str = "TON",
+                       single_rate_for: str = "TRUCK") -> dict:
+    """AI first; on any problem use the rule-based reader. Rule results fill gaps AI left.
+    All rates come back per TON."""
     from core import parse_msg
-    rules = parse_msg.parse(text, trucks, parties, places, materials)
+    rules = parse_msg.parse(text, trucks, parties, places, materials, default_unit=default_unit,
+                            single_rate_for=single_rate_for)
     if not configured():
         rules["source"] = "rules"
         return rules
     try:
-        ai = parse_message(text, trucks, parties)
+        ai = parse_message(text, trucks, parties, default_unit, single_rate_for)
     except AIError as e:
         rules["source"] = "rules"
         rules["notes"].insert(0, f"⚠️ {e} — purane tareeke se padha.")
@@ -248,6 +264,60 @@ def parse_message_safe(text: str, trucks, parties, places, materials) -> dict:
         if k not in ai:
             ai["notes"].append(f"Not found: {label}.")
     return ai
+
+
+# ---------- 1b. one message, many trucks ----------
+
+MULTI_PROMPT = """You read an Indian truck-booking WhatsApp message that may list SEVERAL trucks.
+Return ONLY JSON: {"trips": [ {one object per truck, same keys as below} ]}
+Keys per truck (null when not in the message):
+{"truck_no": "", "from_place": "", "to_place": "", "weight_ton": null, "rate": null,
+ "rate_unit": "ton|quintal|fixed|unknown", "rate_for": "party|truck|unknown", "party_rate": null, "truck_rate": null,
+ "party_name": "", "material": "", "gr_no": "", "advance": null, "driver_mobile": "", "points": null, "notes": ""}
+Rules:
+- One object per truck number. Details written once for all trucks (route, rate, party, material) go into EVERY truck.
+- Details written next to one truck (its weight, driver no., GR, advance) go only to that truck.
+- truck_no uppercase without spaces. "mt 35", "35 MT", "35 ton" = weight_ton 35.
+- rate_for = "party" or "truck" ONLY if the message says so, else "unknown". "qtl"/"quintal" = rate_unit quintal.
+- Never invent values.
+Message:
+"""
+
+
+def parse_many(text: str, trucks, parties, default_unit: str = "TON", single_rate_for: str = "TRUCK") -> list[dict]:
+    r = ask_json(MULTI_PROMPT + text.strip(), timeout=60)
+    items = r.get("trips") if isinstance(r, dict) else r
+    out = []
+    for x in items or []:
+        if isinstance(x, dict) and calc.normalize_truck_no(x.get("truck_no") or ""):
+            m = _map_one(x, trucks, parties, default_unit, single_rate_for)
+            m["notes"] = [n for n in m["notes"] if not n.startswith(("Not found", "Message ka rate"))]
+            out.append(m)
+    return out
+
+
+def parse_many_safe(text: str, trucks, parties, places, materials, default_unit: str = "TON",
+                    single_rate_for: str = "TRUCK") -> list[dict]:
+    """All trucks of a message (AI first, rule reader as backup and gap-filler). Rates per TON."""
+    from core import parse_msg
+    rules = parse_msg.parse_many(text, trucks, parties, places, materials, default_unit=default_unit,
+                                 single_rate_for=single_rate_for)
+    if not configured():
+        return rules
+    try:
+        found = parse_many(text, trucks, parties, default_unit, single_rate_for)
+    except AIError as e:
+        if rules:
+            rules[0]["notes"].insert(0, f"⚠️ {e} — purane tareeke se padha.")
+        return rules
+    if not found:
+        return rules
+    by_truck = {r_.get("truck_no"): r_ for r_ in rules}
+    for f in found:
+        for k, v in (by_truck.get(f.get("truck_no")) or {}).items():
+            if k not in ("notes", "source") and k not in f and v:
+                f[k] = v
+    return found
 
 
 # ---------- 2. GR / POD photo ----------

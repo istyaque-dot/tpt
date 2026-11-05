@@ -158,6 +158,26 @@ Har payment entry mein Trip No. link hoga (pump payment aur contra ko chhodkar).
   credit hai (Form 26AS / ITR mein milta hai), isliye profit nahi ghatata. Trial balance mein "TDS Receivable" dikhega.
 - Purani trips (TDS column se pehle wali) par TDS 0 rehta hai, unka hisaab nahi badalta.
 
+## Ek message, kai trucks (Nov 2026)
+- Message mein 2+ truck numbers -> ek table: har truck ki ek row (Truck, From, To, Weight, Truck rate, Freight, GR, Comment).
+- Ek baar likha route / rate / party sab trucks mein; weight / driver no. / GR / advance sirf apne truck mein.
+- Upar ek baar: company, freight "sab ke liye" (row mein alag likh sakte ho), commission, TDS, date.
+- "💾 N trips Save karo" — har row ki alag trip; GR duplicate wali row save nahi hoti, baaki ho jaati hain.
+
+## Kam typing — pichhli trips se (Nov 2026)
+- Destination likhte hi: **party** (us jagah ki pichhli), **commission** (us truck owner ka pichhla), **From**, **maal** apne aap bharte hain — badal sakte ho.
+- **Freight aur truck rate apne aap NAHI bharte** (ye har baar badalte hain). Box ke neeche "↩ pichhli baar ₹185" button — tap karoge tabhi bharega.
+- **🔁 Pichhli trip jaisa**: party, route, maal, commission, TDS copy; rate aur truck khud likhne hain.
+- Ek box sirf ek baar apne aap bharta hai; aapka likha hua kabhi nahi badalta.
+
+## Rate per quintal (Nov 2026)
+- Rate **₹/quintal** mein likhte aur dikhte hain (Settings mein ton bhi chun sakte ho). 1 ton = 10 quintal.
+- Andar hisaab hamesha **per ton** (₹175/qtl = ₹1,750/ton), isliye unit badalne se paisa nahi badalta.
+- Message mein "Rate 175" bina unit -> quintal maana jaata hai; "per ton / PMT / /ton" likha ho to ton.
+- Message ka akela rate = **TRUCK ka bhada** (Settings mein badal sakte ho). "party rate / freight" likha ho to party ka. Do rate bina naam = bada party, chhota truck.
+- Weight ton (MT) mein hi rehta hai.
+- Truck owner par TDS **nahi** katta (sirf party TDS kaatti hai).
+
 ## Truck & Commission (Nov 2026)
 - Truck No. **type** hota hai. Purana truck: poora number ya last 3–4 digit (agar ek hi truck mile).
   Naya truck: Save par apne aap ban jaata hai; owner ka naam optional (khaali = truck no. hi owner).

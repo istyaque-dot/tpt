@@ -237,6 +237,17 @@ def test_party_tds_one_percent():
     assert calc.trip_amounts(base_trip(tds_rate=Dec("1"), loaded_weight=None))["party_tds"] == 0
 
 
+def test_rate_units():
+    assert calc.rate_store(Dec("175"), "QUINTAL") == Dec("1750.00")
+    assert calc.rate_show(Dec("1750"), "QUINTAL") == Dec("175")
+    assert calc.rate_store(Dec("1750"), "TON") == Dec("1750.00")
+    assert calc.rate_text(Dec("35"), Dec("1750"), "QUINTAL") == "350 qtl × ₹175"
+    assert calc.rate_text(Dec("25.5"), Dec("1100"), "TON") == "25.5 T × ₹1100"
+    # 35 T at ₹175/qtl: hire = 35 × 1750 = 61,250
+    t = base_trip(loaded_weight=Dec("35"), truck_rate=calc.rate_store(Dec("175"), "QUINTAL"), commission_value=0)
+    assert calc.trip_amounts(t)["truck_hire"] == Dec("61250.00")
+
+
 if __name__ == "__main__":
     n = 0
     for name, fn in list(globals().items()):
