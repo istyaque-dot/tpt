@@ -27,6 +27,18 @@ P = {
     "masters": st.Page("views/masters.py", title="Masters", icon="📇"),
     "settings": st.Page("views/settings_page.py", title="Settings", icon="⚙️"),
 }
+# daily backup to Google Drive: first open of the day (takes a few seconds, once)
+if not st.session_state.get("_bk_checked"):
+    st.session_state["_bk_checked"] = True
+    try:
+        from core import backup
+        with st.spinner("Aaj ka backup Drive par ja raha hai..."):
+            _bk = backup.auto_if_due()
+        if _bk:
+            st.toast(_bk, icon="💾")
+    except Exception:          # backup must never block the app
+        pass
+
 nav.PAGES.clear()
 nav.PAGES.update(P)
 

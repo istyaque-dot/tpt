@@ -42,24 +42,52 @@ places, materials = db.lookups("PLACE"), db.lookups("MATERIAL")
 
 # ---------- paste a WhatsApp / SMS message -> fill the form ----------
 pf = st.session_state.get("nt_prefill") or {}
-with st.expander("📋 Paste message / 📷 GR photo — app fills the form" + (" 🤖" if ai.configured() else ""),
+
+
+def _fill_from(msg: str, keep_text: bool = False):
+    """Message text (typed, pasted or spoken) -> form values. 2+ trucks -> multi-truck screen."""
+    from core import parse_msg
+    n_trucks = len({parse_msg._plate_key(*m.groups()) for m in parse_msg.PLATE.finditer(msg)})
+    with st.spinner("Padh raha hoon..."):
+        if n_trucks >= 2:            # one message, many trucks -> one screen to save them all
+            st.session_state["nt_multi"] = ai.parse_many_safe(msg, trucks_, parties, places, materials,
+                                                              default_unit=db.rate_unit(),
+                                                              single_rate_for=db.message_rate_for())
+        else:
+            st.session_state["nt_prefill"] = ai.parse_message_safe(msg, trucks_, parties, places, materials,
+                                                                   default_unit=db.rate_unit(),
+                                                                   single_rate_for=db.message_rate_for())
+    st.session_state["nt_n"] = n + 1          # fresh form so the found values show up
+    if keep_text:
+        st.session_state[f"nt_msg_{n + 1}"] = msg
+    st.rerun()
+
+
+with st.expander("🎤 Bolo / 📋 Paste message / 📷 GR photo — app form bharega" + (" 🤖" if ai.configured() else ""),
                  expanded=not pf):
+    # ---- voice: speak the booking, AI writes it as a message, then the normal reader fills the form ----
+    if ai.configured() and hasattr(st, "audio_input"):
+        voice = st.audio_input("🎤 Bol kar trip likhwao — jaise: \"UP70FT7739 Kashipur se Sultanpur, "
+                               "35 ton, rate 175\"", key=f"nt_voice_{n}")
+        if voice is not None:
+            data = voice.getvalue()
+            sig = (len(data), hash(data[:2000]))
+            if st.session_state.get("nt_voice_sig") != sig:      # each recording is read only once
+                st.session_state["nt_voice_sig"] = sig
+                try:
+                    with st.spinner("Sun raha hoon..."):
+                        heard = ai.transcribe(data, voice.type or "audio/wav")
+                    st.session_state["nt_heard"] = heard
+                    _fill_from(heard, keep_text=True)
+                except ai.AIError as e:
+                    st.error(str(e))
+    else:
+        st.caption("🎤 Tip: phone keyboard ka mic dabakar neeche box mein bol bhi sakte ho.")
     msg = st.text_area("Booking message", key=f"nt_msg_{n}", height=110, label_visibility="collapsed",
                        placeholder="e.g. UP70FT7739 Kashipur to Sultanpur 2point mt 35 Rate 175 Driver no 9005899224")
     if st.button("✨ Fill from message", type="primary", use_container_width=True, disabled=not msg.strip()):
-        from core import parse_msg
-        n_trucks = len({parse_msg._plate_key(*m.groups()) for m in parse_msg.PLATE.finditer(msg)})
-        with st.spinner("Padh raha hoon..."):
-            if n_trucks >= 2:            # one message, many trucks -> one screen to save them all
-                st.session_state["nt_multi"] = ai.parse_many_safe(msg, trucks_, parties, places, materials,
-                                                                  default_unit=db.rate_unit(),
-                                                                  single_rate_for=db.message_rate_for())
-            else:
-                st.session_state["nt_prefill"] = ai.parse_message_safe(msg, trucks_, parties, places, materials,
-                                                                       default_unit=db.rate_unit(),
-                                                                       single_rate_for=db.message_rate_for())
-        st.session_state["nt_n"] = n + 1          # fresh form so the found values show up
-        st.rerun()
+        st.session_state.pop("nt_heard", None)
+        _fill_from(msg)
     if ai.configured():
         gr_photo = st.file_uploader("…ya GR / bilty ki photo (AI padhega)", type=["jpg", "jpeg", "png", "webp", "pdf"],
                                     key=f"nt_grphoto_{n}")
@@ -90,6 +118,8 @@ with st.expander("📋 Paste message / 📷 GR photo — app fills the form" + (
                 st.rerun()
             except ai.AIError as e:
                 st.error(str(e))
+if st.session_state.get("nt_heard") and (pf or st.session_state.get("nt_multi")):
+    st.caption(f"🎤 Suna: “{st.session_state['nt_heard']}”")
 if st.session_state.get("nt_multi"):
     from core import multi_ui
     multi_ui.render(st.session_state["nt_multi"], trucks_, parties, n)
@@ -111,6 +141,7 @@ if pf:
         st.warning(note)
     if st.button("✖ Clear filled values", use_container_width=True):
         st.session_state.pop("nt_prefill", None)
+        st.session_state.pop("nt_heard", None)
         st.session_state["nt_n"] = n + 1
         st.rerun()
 RU = db.rate_unit()                       # rates typed in ₹/qtl (or ₹/ton), stored per ton
@@ -269,6 +300,11 @@ with st.expander("More: From, material, date"):
     material = c2.text_input("Material", key=K("mat"), placeholder="Optional")
     trip_date = st.date_input("Trip date", value=clock.today(), format="DD/MM/YYYY", key=K("date"))
 
+dup = trips.same_day_trips(truck_id, trip_date)
+if dup:
+    st.warning(f"⚠️ Is truck ki {trip_date:%d/%m} ki trip pehle se hai: {', '.join(dup)}. "
+               "Dobara entry to nahi ho rahi? Nayi trip ho to Save dabao.")
+
 if st.button("💾 Save trip", type="primary", use_container_width=True):
     errs = []
     if not truck_id and not new_truck:
@@ -313,6 +349,7 @@ if st.button("💾 Save trip", type="primary", use_container_width=True):
                     st.session_state["nt_gr_err"] = f" · GR copy upload nahi hui: {e}"
         st.session_state["nt_msg_advance"] = pf.get("advance")
         st.session_state.pop("nt_prefill", None)
+        st.session_state.pop("nt_heard", None)
         st.session_state["nt_n"] = n + 1
         ui.flash(f"Trip saved: {trips.get_trip(tid)['trip_no']}" + st.session_state.pop("nt_gr_err", ""))
         st.rerun()

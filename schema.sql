@@ -127,9 +127,21 @@ alter table trips add column if not exists pod_submit_ref  text;      -- courier
 alter table trips add column if not exists party_demurrage_days integer;
 -- TDS % deducted by the party on this trip's freight (old trips: 0 so their hisaab does not change)
 alter table trips add column if not exists tds_rate numeric(5,2) not null default 0;
+-- fix: a blank GR from a table cell was once saved as 'nan' — make it blank again
+update trips set gr_no = null, gr_date = null where upper(trim(gr_no)) in ('NAN', 'NONE', 'NULL', '');
 
 create unique index if not exists trips_gr_unique
     on trips (upper(gr_no)) where gr_no is not null and is_cancelled = false;
+-- 'GR-1234', 'GR 1234' and 'gr1234' are the same GR. If two old trips already share one, the index is
+-- skipped (schema still runs) and Hisaab Check lists them so one can be corrected; then run this file again.
+do $$
+begin
+    create unique index if not exists trips_gr_unique_norm
+        on trips (regexp_replace(upper(gr_no), '[^A-Z0-9]', '', 'g'))
+        where gr_no is not null and is_cancelled = false;
+exception when unique_violation then
+    raise notice 'Same GR No. in two trips (ignoring - and spaces). Fix them (Hisaab Check), then run schema.sql again.';
+end $$;
 create index if not exists trips_booking_date on trips (booking_date);
 create index if not exists trips_party on trips (party_id);
 create index if not exists trips_owner on trips (owner_id);
@@ -217,3 +229,44 @@ create table if not exists drive_folders (
     path      text primary key,
     folder_id text not null
 );
+
+-- ---------- Follow-up log (WhatsApp reminder sent to party / truck for POD) ----------
+create table if not exists followups (
+    id      bigserial primary key,
+    at      timestamptz not null default now(),
+    kind    text not null check (kind in ('PARTY','POD')),
+    ref_id  bigint not null,             -- party account id (PARTY) or trip id (POD)
+    note    text
+);
+create index if not exists followups_ref on followups (kind, ref_id, at desc);
+
+-- ---------- Party freight bills (invoice PDF) ----------
+create table if not exists bills (
+    id            bigserial primary key,
+    fy            text not null,                  -- financial year like 26-27
+    seq           integer not null,
+    bill_no       text not null unique,
+    bill_date     date not null,
+    party_id      bigint not null references accounts(id),
+    freight       numeric(14,2) not null default 0,   -- freight + demurrage of the trips
+    gst_mode      text not null default 'NONE' check (gst_mode in ('NONE','RCM','FORWARD')),
+    gst_rate      numeric(5,2) not null default 0,
+    gst_amt       numeric(14,2) not null default 0,   -- only FORWARD adds GST to the bill
+    total         numeric(14,2) not null default 0,
+    lines         jsonb not null default '[]',        -- snapshot of the trip lines as printed
+    voucher_id    bigint references vouchers(id),     -- GST posting (FORWARD only)
+    is_cancelled  boolean not null default false,
+    cancel_reason text,
+    created_at    timestamptz not null default now(),
+    unique (fy, seq)
+);
+create index if not exists bills_party on bills (party_id);
+alter table trips add column if not exists bill_id bigint references bills(id);
+
+insert into accounts (name, acc_type, system_code) values ('GST Payable', 'OTHER', 'GST_PAYABLE')
+    on conflict do nothing;
+insert into settings (key, value) values
+    ('bill_gst_mode', 'NONE'), ('bill_gst_rate', '5'), ('bill_sac', '996791'),
+    ('company_address', ''), ('company_gstin', ''), ('company_pan', ''), ('company_mobile', ''),
+    ('company_bank', ''), ('last_auto_backup', '')
+    on conflict (key) do nothing;

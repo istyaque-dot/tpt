@@ -8,7 +8,7 @@ from core import calc, clock, db, nav, trips, ui
 st.markdown("### 🏢 Party: POD & Payment")
 
 MODES = ["By hand", "Courier", "Email", "WhatsApp", "Other"]
-SECTIONS = ["🧾 Party settlement", "📤 POD jama karo (bulk)", "⏳ Payment follow-up"]
+SECTIONS = ["🧾 Party settlement", "📤 POD jama karo (bulk)", "⏳ Payment follow-up", "📃 Bill banao"]
 sel = st.pills("Section", SECTIONS, default=SECTIONS[0], key="psec", label_visibility="collapsed") or SECTIONS[0]
 
 parties = db.accounts("PARTY")
@@ -213,19 +213,171 @@ if sel == SECTIONS[0]:
 
 # ====================== 3. follow-up ======================
 if sel == SECTIONS[2]:
-    st.caption("POD given to party, payment still pending — oldest first.")
-    rows = [r for r in trips.load_trips("not t.is_cancelled and t.pod_submitted", None, "t.pod_submit_date")
-            if not calc.party_settled(r, r) and r["party_balance"] > calc.SETTLED_TOLERANCE]
-    by_party = {}
-    for r in rows:
-        by_party.setdefault(r["party_name"], []).append(r)
-    if not rows:
-        st.success("Koi payment pending nahi. 👍")
-    for name, rs in sorted(by_party.items(), key=lambda kv: kv[1][0]["pod_submit_date"]):
-        tot = sum((r["party_balance"] for r in rs), calc.ZERO)
-        oldest = (clock.today() - rs[0]["pod_submit_date"]).days
-        with st.expander(f"{name} · ₹{ui.inr(tot)} · {len(rs)} truck(s) · oldest {oldest} days"):
-            df = pd.DataFrame([{"Truck": r["truck_no"], "GR": r.get("gr_no"), "POD given": r["pod_submit_date"],
-                                "Days": (clock.today() - r["pod_submit_date"]).days,
-                                "Balance": float(r["party_balance"])} for r in rs])
-            ui.show_table(df, f"fu_{name[:15]}", money_cols=["Balance"])
+    from core import followup
+
+    company = db.setting("company_name", "My Transport")
+    today = clock.today()
+    sub = st.pills("Follow-up", ["💰 Party se paisa", "📄 Truck se POD"], default="💰 Party se paisa",
+                   key="fu_sub", label_visibility="collapsed") or "💰 Party se paisa"
+    try:
+        last_sent = {(r["kind"], r["ref_id"]): r["at"] for r in db.query(
+            "select distinct on (kind, ref_id) kind, ref_id, at from followups order by kind, ref_id, at desc")}
+    except Exception:          # followups table not created yet (old schema)
+        last_sent = {}
+
+    def sent_label(kind, ref):
+        at = last_sent.get((kind, ref))
+        if not at:
+            return ""
+        d = (today - at.astimezone(clock.IST).date()).days if hasattr(at, "astimezone") else 0
+        return " · 📨 aaj bheja" if d == 0 else f" · 📨 {d} din pehle bheja"
+
+    def mark_sent(kind, ref, note):
+        try:
+            db.execute("insert into followups (kind, ref_id, note) values (%s, %s, %s)", (kind, ref, note))
+        except Exception as e:
+            st.error(f"Note save nahi hua (schema.sql chalao): {e}")
+
+    all_trips = trips.load_trips("not t.is_cancelled", None, "t.id")
+    if sub.startswith("💰"):
+        dues = followup.party_dues(all_trips, today)
+        if not dues:
+            st.success("Kisi party ka paisa baaki nahi. 👍")
+        else:
+            grand = {b[0]: sum((p["buckets"][b[0]] for p in dues), calc.ZERO) for b in followup.BUCKETS}
+            ui.metric_grid([(k, ui.inr(v)) for k, v in grand.items()], per_row=4)
+            st.caption("Din = POD party ko dene ke din se (POD nahi diya to loading se). Sabse purana upar.")
+        mobiles = {p["id"]: p.get("mobile") for p in parties}
+        for p in dues:
+            head = (f"{'🔴' if p['oldest'] > 30 else '🟠' if p['oldest'] > 15 else '🟢'} {p['party']} · "
+                    f"₹{ui.inr(p['total'])} · {len(p['lines'])} truck · {p['oldest']} din"
+                    + sent_label("PARTY", p["party_id"]))
+            with st.expander(head):
+                ui.metric_grid([(k, ui.inr(v)) for k, v in p["buckets"].items() if v], per_row=4)
+                df = pd.DataFrame([{"Truck": x["truck_no"], "GR": x["gr_no"], "Trip": x["trip_no"],
+                                    "POD diya": "✓" if x["pod_given"] else "—", "Din": x["days"],
+                                    "Baaki ₹": float(x["balance"])} for x in p["lines"]])
+                ui.show_table(df, f"fu_{p['party_id']}", money_cols=["Baaki ₹"])
+                only = st.checkbox("Message mein sirf POD diye hue trucks", value=any(x["pod_given"] for x in p["lines"]),
+                                   key=f"fu_only_{p['party_id']}")
+                text = followup.party_message(p, company, only_pod_given=only)
+                mob = mobiles.get(p["party_id"])
+                c1, c2 = st.columns(2)
+                c1.link_button("💬 WhatsApp reminder", followup.wa_link(mob, text), use_container_width=True,
+                               type="primary")
+                if c2.button("✓ Bhej diya", key=f"fu_sent_{p['party_id']}", use_container_width=True):
+                    mark_sent("PARTY", p["party_id"], f"₹{p['total']}")
+                    st.rerun()
+                if not mob:
+                    st.caption("Party ka mobile Masters mein daalo to WhatsApp seedha usi chat mein khulega.")
+                with st.expander("Message (copy)"):
+                    st.code(text, language=None)
+    else:
+        min_days = st.number_input("Kitne din se purani (unloading / loading se)", min_value=0, value=7, step=1,
+                                   key="fu_pod_days")
+        pend = followup.pod_pending(all_trips, today, int(min_days))
+        tinfo = {r["id"]: r for r in db.query("select t.id, t.driver_mobile, a.mobile owner_mobile from trucks t "
+                                                "join accounts a on a.id = t.owner_id")}
+        st.caption(f"{len(pend)} trip ki POD abhi truck se nahi aayi.")
+        for t in pend[:60]:
+            info = tinfo.get(t["truck_id"], {})
+            with st.container(border=True):
+                st.markdown(f"**{t['truck_no']}** · {t['trip_no']} · {calc.route(t)} · **{t['days']} din**"
+                            + (f" · GR {t['gr_no']}" if t.get("gr_no") else "") + sent_label("POD", t["id"]))
+                text = followup.pod_message(t, company)
+                c1, c2, c3 = st.columns(3)
+                c1.link_button("💬 Driver", followup.wa_link(info.get("driver_mobile"), text),
+                               use_container_width=True, disabled=not info.get("driver_mobile"))
+                c2.link_button("💬 Owner", followup.wa_link(info.get("owner_mobile"), text),
+                               use_container_width=True)
+                if c3.button("✓ Bheja", key=f"fu_pod_{t['id']}", use_container_width=True):
+                    mark_sent("POD", t["id"], "")
+                    st.rerun()
+
+# ====================== 4. freight bill ======================
+if sel == SECTIONS[3]:
+    from core import bills, followup
+
+    party = st.selectbox("Party", pids, format_func=pn.get, index=None, placeholder="Type to search", key="bl_party")
+    if not party:
+        st.stop()
+    co = bills.company()
+    if not co["name"] or not co["address"]:
+        st.info("Bill par aapka naam, pata, GSTIN, bank — Settings → Bill details mein bhar do.")
+    try:
+        avail = bills.billable_trips(party)
+    except Exception as e:      # bills table / trips.bill_id not created yet
+        st.error(f"Pehle Supabase mein latest schema.sql chalao. ({str(e)[:120]})")
+        st.stop()
+
+    st.markdown("#### Naya bill")
+    if not avail:
+        st.caption("Is party ki koi loaded trip bina bill ke nahi bachi.")
+    else:
+        bn = st.session_state.get("bl_n", 0)
+        df = pd.DataFrame([{"Bill": True, "id": t["id"], "Truck": t["truck_no"], "GR": t.get("gr_no") or "",
+                            "Date": t.get("loading_date"), "Route": calc.route(t),
+                            "Freight ₹": float(t["party_freight"] + t["party_demurrage"]),
+                            "POD diya": "✓" if t.get("pod_submitted") else "—"} for t in avail])
+        ed = st.data_editor(df, hide_index=True, use_container_width=True, key=f"bl_ed_{party}_{bn}",
+                            disabled=[c for c in df.columns if c != "Bill"],
+                            column_config={"id": None, "Bill": st.column_config.CheckboxColumn("✓"),
+                                           "Freight ₹": st.column_config.NumberColumn(format="%.2f"),
+                                           "Date": st.column_config.DateColumn(format="DD/MM/YY")})
+        chosen = [int(r["id"]) for _, r in ed.iterrows() if r.get("Bill")]
+        modes = list(bills.GST_MODES)
+        dm = (db.setting("bill_gst_mode", "NONE") or "NONE").upper()
+        c1, c2, c3 = st.columns(3)
+        mode = c1.selectbox("GST", modes, index=modes.index(dm) if dm in modes else 0, format_func=bills.GST_MODES.get,
+                            key="bl_mode")
+        rate = c2.number_input("GST %", min_value=0.0, max_value=28.0, step=1.0, key="bl_rate",
+                               value=float(db.setting("bill_gst_rate", "5") or 5), disabled=mode == "NONE")
+        b_date = c3.date_input("Bill date", value=clock.today(), format="DD/MM/YYYY", key="bl_date")
+        lines = [bills.trip_line(t) for t in avail if t["id"] in chosen]
+        party_row = next((p for p in parties if p["id"] == party), {})
+        tot = bills.totals(lines, mode, rate, bills.same_state(co["gstin"], party_row.get("gstin")))
+        ui.metric_grid([("Trips", len(lines)), ("Freight", ui.inr(tot["freight"])),
+                        ("GST (bill mein)", ui.inr(tot["gst"])), ("Bill amount", ui.inr(tot["total"]))], per_row=4)
+        if mode == "FORWARD":
+            st.caption("GST party ke khate mein judega (Party Dr / GST Payable Cr). Trip-wise baaki sirf freight ka rahega.")
+        elif mode == "RCM":
+            st.caption(f"Bill par note: GST ₹{ui.inr(tot['rcm_gst'])} party khud RCM mein bharegi. Khate mein entry nahi.")
+        if st.button(f"💾 Bill banao ({len(lines)} trip)", type="primary", use_container_width=True,
+                     disabled=not lines):
+            try:
+                b = bills.create(party, chosen, b_date, mode, rate)
+                st.session_state["bl_n"] = bn + 1
+                st.session_state["bl_last"] = b["id"]
+                ui.flash(f"Bill {b['bill_no']} ban gaya — ₹{ui.inr(b['total'])}")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+    st.markdown("#### Is party ke bill")
+    show_rcv = st.checkbox("PDF mein 'Received / Balance' bhi dikhao", value=False, key="bl_show_rcv")
+    for b in bills.list_for(party):
+        strike = "~~" if b["is_cancelled"] else ""
+        with st.expander(f"{strike}{b['bill_no']} · {b['bill_date']:%d/%m/%Y} · ₹{ui.inr(b['total'])} · "
+                         f"{len(b['lines'])} trip{strike}" + (" · CANCELLED" if b["is_cancelled"] else ""),
+                         expanded=b["id"] == st.session_state.get("bl_last")):
+            st.caption(", ".join(f"{x['truck_no']} ({x['trip_no']})" for x in b["lines"]))
+            if b["is_cancelled"]:
+                st.caption(f"Cancel: {b.get('cancel_reason') or ''}")
+                continue
+            ch = bills.changed_since_bill(b)
+            if ch:
+                st.warning(f"Bill ke baad in trips ka freight badla: {', '.join(ch)}. Bill cancel karke naya banao.")
+            full = bills.get(b["id"])
+            c1, c2 = st.columns(2)
+            c1.download_button("⬇ Bill PDF", bills.to_pdf(full, co, show_rcv),
+                               file_name=f"Bill_{b['bill_no'].replace('/', '-')}.pdf", mime="application/pdf",
+                               use_container_width=True, type="primary", key=f"bl_pdf_{b['id']}")
+            c2.link_button("💬 WhatsApp", followup.wa_link(full.get("party_mobile"),
+                                                           bills.whatsapp_text(full, co["name"] or "")),
+                           use_container_width=True)
+            with st.popover("✖ Cancel bill", use_container_width=True):
+                why = st.text_input("Kyun?", key=f"bl_why_{b['id']}")
+                if st.button("Haan, cancel karo", key=f"bl_cx_{b['id']}", disabled=not why.strip()):
+                    bills.cancel(b["id"], why.strip())
+                    ui.flash(f"Bill {b['bill_no']} cancel")
+                    st.rerun()

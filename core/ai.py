@@ -154,6 +154,31 @@ Message:
 """
 
 
+VOICE_PROMPT = """This is a voice note from an Indian transport broker booking a truck (Hindi / Hinglish / English).
+Write what he said as ONE short WhatsApp-style booking message in Roman letters (Hinglish), so a program can read it.
+Return ONLY JSON: {"text": "..."}
+Rules:
+- All numbers as digits: "pachattar" -> 75, "ek sau pachattar" / "one seventy five" -> 175, "paintees" -> 35.
+- Truck numbers as plates without spaces: "U P sattar F T saat saat teen nau" -> UP70FT7739.
+  If he says only the last digits ("saat saat teen nau gaadi") write 7739.
+- Keep direction words: "Kashipur se Sultanpur" stays "Kashipur se Sultanpur".
+- Keep units he said: ton / MT / quintal / qtl, "point", "advance", "GR", party / company name, "rate", "freight", "bhada".
+- Several trucks: one truck per line.
+- Do not add anything he did not say. Silence / unclear audio -> {"text": ""}.
+"""
+
+
+def transcribe(audio: bytes, mime: str = "audio/wav") -> str:
+    """Voice note -> booking message text (then read like a pasted message). Raises AIError."""
+    r = ask_json(VOICE_PROMPT, files=[(audio, mime or "audio/wav")], timeout=60)
+    if isinstance(r, list):
+        r = r[0] if r else {}
+    text = str((r or {}).get("text") or "").strip()
+    if not text:
+        raise AIError("Awaaz saaf samajh nahi aayi — dobara thoda paas se bolo.")
+    return text
+
+
 def parse_message(text: str, trucks: list[dict], parties: list[dict], default_unit: str = "TON",
                   single_rate_for: str = "TRUCK") -> dict:
     """Same output shape as core.parse_msg.parse (so New Trip can use either)."""

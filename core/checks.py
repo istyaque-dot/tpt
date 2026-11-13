@@ -122,14 +122,33 @@ def run_all() -> list[tuple]:
             for t in all_trips if calc.is_loaded(t) and (not t["party_rate"] or not t["truck_rate"])]
     results.append(("Loaded trips have both rates", not rows, "A loaded trip with rate 0 makes a zero bill.", rows))
 
-    # 7. same truck on two running trips
-    running = defaultdict(list)
+    # 7. same truck twice on the same day / waiting for loading twice.
+    # (A truck that reloads before the old POD arrives is normal, so 'Loaded' trips alone are not flagged.)
+    same_day, waiting = defaultdict(list), defaultdict(list)
     for t in all_trips:
-        if t.get("truck_id") and t["status"] in ("Truck Assigned", "Loaded"):
-            running[t["truck_no"]].append(t["trip_no"])
-    rows = [{"Truck": k, "Trips": ", ".join(v)} for k, v in running.items() if len(v) > 1]
-    results.append(("No truck on two running trips at once", not rows,
-                    "Usually means the wrong truck was selected in one trip.", rows))
+        if not t.get("truck_id") or t.get("is_cancelled"):
+            continue
+        day = t.get("loading_date") or t.get("booking_date")
+        same_day[(t["truck_no"], day)].append(t["trip_no"])
+        if t["status"] == "Truck Assigned":
+            waiting[t["truck_no"]].append(t["trip_no"])
+    rows = [{"Truck": k[0], "Date": k[1], "Trips": ", ".join(v), "Problem": "same day"}
+            for k, v in same_day.items() if len(v) > 1]
+    rows += [{"Truck": k, "Date": "", "Trips": ", ".join(v), "Problem": "2 trips waiting for loading"}
+             for k, v in waiting.items() if len(v) > 1]
+    results.append(("No double entry of a truck", not rows,
+                    "Same truck twice on one day (or two trips both waiting for loading) is usually a "
+                    "duplicate entry or the wrong truck in one trip.", rows))
+
+    # 7b. same GR in two trips when '-', '/' and spaces are ignored (GR-1234 = GR 1234 = gr1234)
+    by_gr = defaultdict(list)
+    for t in all_trips:
+        key = calc.normalize_truck_no(t.get("gr_no") or "")      # letters + digits only, uppercase
+        if key:
+            by_gr[key].append(f"{t['trip_no']} ({t['gr_no']})")
+    rows = [{"GR": k, "Trips": ", ".join(v)} for k, v in by_gr.items() if len(v) > 1]
+    results.append(("GR No. not repeated", not rows,
+                    "One GR belongs to one trip. Correct the GR in one of these trips.", rows))
 
     # 8. cash never negative
     cash = sys_acc.get("CASH")

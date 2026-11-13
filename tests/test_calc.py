@@ -248,6 +248,12 @@ def test_rate_units():
     assert calc.trip_amounts(t)["truck_hire"] == Dec("61250.00")
 
 
+def test_blank_gr():
+    for v in (None, "", "  ", float("nan"), "nan", "NaN", "None"):
+        assert calc.normalize_gr(v) == ""
+    assert calc.normalize_gr(" gr4521 ") == "GR4521"
+
+
 if __name__ == "__main__":
     n = 0
     for name, fn in list(globals().items()):

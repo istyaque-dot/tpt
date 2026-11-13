@@ -11,6 +11,10 @@ Business rules: **LOGIC.md**.
 | `core/calc.py` | Saara hisaab (freight, hire, commission, balance, status) — tests ke saath |
 | `core/trips.py` | Trip save + double-entry posting |
 | `core/drive.py` | Google Drive upload |
+| `core/bills.py` | Party freight bill (Bill No., GST, PDF) |
+| `core/followup.py` | Baaki paisa / POD follow-up, WhatsApp message |
+| `core/backup.py` | Backup zip + roz Drive par auto backup |
+| `assets/fonts/` | PDF ka font (₹ sign ke liye) — zaroor upload karna |
 | `views/*.py` | Screens: Dashboard, Trips, Payments, Documents, Reports, Masters, Settings |
 | `get_drive_token.py` | Google Drive connect karne ke liye (ek baar, apne computer par) |
 
@@ -59,7 +63,7 @@ columns / tables / accounts jodta hai, purana data nahi chhoota.
 1. aistudio.google.com → Gmail se login → **Get API key → Create API key** → copy.
 2. Streamlit → Manage app → Settings → Secrets → **sabse upar** `GEMINI_API_KEY = "..."` → Save.
 3. App → Settings → **Test AI**.
-Phir: New Trip mein message / GR photo se form, trip upload mein "🤖 AI se padho", GR/POD Documents mein
+Phir: New Trip mein 🎤 bol kar trip, message / GR photo se form, trip upload mein "🤖 AI se padho", GR/POD Documents mein
 "🤖 Scanned POD (AI kaatega)".
 
 ## Speed & login (professional version)
@@ -101,6 +105,9 @@ Phir: New Trip mein message / GR photo se form, trip upload mein "🤖 AI se pad
 - **POD aaye** → POD received tick (ya POD copy upload karo) → truck balance payment.
 - **Party payment** → Payments → Party receipt → ek payment kai trips mein baant do.
 - **Galat entry** → Payments → Entries list → Cancel (reason ke saath).
+- **Party ko bill** → Party: POD & Payment → 📃 Bill banao → PDF / WhatsApp.
+- **Paisa / POD yaad dilana** → Party: POD & Payment → ⏳ Payment follow-up → 💬 WhatsApp.
+- **Backup** → Drive juda ho to roz apne aap (Settings → Backup mein status).
 
 ## POD bulk upload
 1. Har POD page par GR No. likho, sab ek saath ADF scanner se scan karo.
@@ -109,5 +116,5 @@ Phir: New Trip mein message / GR photo se form, trip upload mein "🤖 AI se pad
 
 ## Tests
 ```
-python tests/test_calc.py
+python -m pytest -q tests
 ```

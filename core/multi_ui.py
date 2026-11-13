@@ -82,9 +82,28 @@ def render(rows: list[dict], trucks_: list[dict], parties: list[dict], n: int):
                         ("Profit (commission ke saath)", ui.inr(tot_fr - tot_hire + comm * int(ed["Save"].sum())))],
                        per_row=3)
 
+    # ---- double entry warning (same truck twice in the table, or already entered for this date) ----
+    seen, warn = {}, []
+    for _, r in ed.iterrows():
+        txt = calc.blank_text(r.get("Truck"))
+        if not r.get("Save") or not txt:
+            continue
+        hit = trips.find_truck(txt, trucks_)
+        key = hit["truck_no"] if hit else calc.normalize_truck_no(txt)
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] == 2:
+            warn.append(f"{key} table mein do baar hai")
+        if hit and seen[key] == 1:
+            old = trips.same_day_trips(hit["id"], trip_date)
+            if old:
+                warn.append(f"{key} ki {trip_date:%d/%m} ki trip pehle se hai ({', '.join(old)})")
+    if warn:
+        st.warning("⚠️ Dobara entry to nahi? " + " · ".join(warn) + ". Galat row ka ✓ hata do.")
+
     c1, c2 = st.columns(2)
     if c2.button("✖ Cancel", use_container_width=True, key=f"mt_cancel_{n}"):
         SS.pop("nt_multi", None)
+        SS.pop("nt_heard", None)
         SS["nt_n"] = n + 1
         st.rerun()
     if not c1.button(f"💾 {int(ed['Save'].sum())} trips Save karo", type="primary", use_container_width=True,
@@ -97,16 +116,17 @@ def render(rows: list[dict], trucks_: list[dict], parties: list[dict], n: int):
     for i, r in ed.iterrows():
         if not r.get("Save"):
             continue
-        label = f"Row {i + 1} ({r['Truck'] or '?'})"
-        hit = trips.find_truck(r["Truck"] or "", trucks_)
+        truck_txt = calc.blank_text(r["Truck"])
+        label = f"Row {i + 1} ({truck_txt or '?'})"
+        hit = trips.find_truck(truck_txt, trucks_) if truck_txt else None
         new_no = None
         if not hit:
-            if trips.looks_like_truck_no(r["Truck"] or ""):
-                new_no = calc.normalize_truck_no(r["Truck"])
+            if trips.looks_like_truck_no(truck_txt):
+                new_no = calc.normalize_truck_no(truck_txt)
             else:
                 errs.append(f"{label}: truck no. sahi likho.")
                 continue
-        if not str(r["To"] or "").strip():
+        if not calc.blank_text(r["To"]):
             errs.append(f"{label}: destination likho.")
         tr = calc.rate_store(r[f"Truck {lab}"], RU) if pd.notna(r[f"Truck {lab}"]) else calc.ZERO
         fr_shown = r[f"Freight {lab}"] if pd.notna(r[f"Freight {lab}"]) and r[f"Freight {lab}"] else common_freight
@@ -122,25 +142,27 @@ def render(rows: list[dict], trucks_: list[dict], parties: list[dict], n: int):
         return
     saved, failed = [], []
     for label, truck_id, new_no, r, tr, fr, w in todo:
-        to = str(r["To"]).strip()
+        to = calc.blank_text(r["To"])
         try:
             tid = trips.create_trip(dict(
-                booking_date=trip_date, party_id=party_id, from_place=str(r["From"] or "").strip() or None,
+                booking_date=trip_date, party_id=party_id, from_place=calc.blank_text(r["From"]) or None,
                 to_place=to.title() if to.islower() else to, party_rate=fr, truck_id=truck_id, truck_rate=tr,
                 loaded_weight=w if w > 0 else None, loading_date=trip_date if w > 0 else None,
-                gr_no=str(r["GR"] or ""), gr_date=trip_date if str(r["GR"] or "").strip() else None,
+                gr_no=calc.blank_text(r["GR"]), gr_date=trip_date if calc.blank_text(r["GR"]) else None,
                 freight_basis=db.setting("freight_basis", "LOADED"), commission_type="FIXED",
-                commission_value=comm, tds_rate=tds_rate, remarks=str(r["Comment"] or "").strip() or None),
+                commission_value=comm, tds_rate=tds_rate, remarks=calc.blank_text(r["Comment"]) or None),
                 new_truck_no=new_no)
             saved.append(trips.get_trip(tid)["trip_no"])
         except psycopg2.errors.UniqueViolation:
-            failed.append(f"{label}: GR No. {r['GR']} pehle se kisi trip mein hai — ye trip save nahi hui.")
+            failed.append(f"{label}: GR No. {calc.blank_text(r['GR'])} pehle se kisi trip mein hai — "
+                          "ye trip save nahi hui.")
         except Exception as e:  # keep going; report at the end
             failed.append(f"{label}: {e}")
     for f in failed:
         st.error(f)
     if saved:
         SS.pop("nt_multi", None)
+        SS.pop("nt_heard", None)
         SS["nt_n"] = n + 1
         ui.flash(f"{len(saved)} trips saved: {', '.join(saved)}" + (f" · {len(failed)} nahi hui" if failed else ""))
         if not failed:

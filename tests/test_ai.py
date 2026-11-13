@@ -20,6 +20,8 @@ PARTIES = [{"id": 10, "name": "Universal Industries"}, {"id": 11, "name": "ABC C
 
 
 def fake(reply):
+    ai.st.secrets = {"GEMINI_API_KEY": "test-key"}     # other test files replace secrets when run together
+
     def _post(model, body, timeout):
         return {"candidates": [{"content": {"parts": [{"text": json.dumps(reply)}]}}]}
     ai._post = _post

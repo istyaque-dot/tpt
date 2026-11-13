@@ -1,7 +1,7 @@
 
 import streamlit as st
 
-from core import clock, db, drive, trips, ui
+from core import calc, clock, db, drive, trips, ui
 
 st.markdown("### 📄 GR / POD Documents")
 
@@ -24,7 +24,7 @@ if sel == SECTIONS[0]:
         ed = st.data_editor(df, hide_index=True, use_container_width=True, key=f"grf_ed_{n}",
                             disabled=[c for c in df.columns if c != "GR No."],
                             column_config={"id": None, "GR No.": st.column_config.TextColumn(required=False)})
-        filled = ed[ed["GR No."].fillna("").str.strip() != ""]
+        filled = ed[ed["GR No."].map(calc.blank_text) != ""]
         if st.button(f"💾 Save {len(filled)} GR No.", type="primary", use_container_width=True,
                      disabled=filled.empty):
             import psycopg2
@@ -82,7 +82,7 @@ if sel == SECTIONS[1]:
                             column_config={"Upload": st.column_config.CheckboxColumn("✓")})
         todo = []
         for i, r in ed.iterrows():
-            t = gr_map.get(drive.match_key(str(r["GR No."] or "")))
+            t = gr_map.get(drive.match_key(calc.blank_text(r["GR No."])))
             if r["Upload"] and t:
                 todo.append((t, groups[i]["pages"]))
         if st.button(f"⬆ {len(todo)} POD trips mein jodo", type="primary", use_container_width=True,

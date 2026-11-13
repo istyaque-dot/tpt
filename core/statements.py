@@ -140,7 +140,8 @@ def trip_statement(trip_id: int) -> dict:
     party_rows = [[f"{x['v_date']:%d/%m/%y}", (x["purpose"] or "").replace("_", " ").title(), x["via"] or "",
                    x["ref_no"] or "", D(x["amount"])] for x in v if x["v_type"] == "RECEIPT"]
     info = [
-        ("Truck", f"{t.get('truck_no') or '-'} ({t.get('owner_name') or '-'})"),
+        ("Truck", (t.get("truck_no") or "-") + (f" ({t['owner_name']})" if t.get("owner_name")
+                                                and t.get("owner_name") != t.get("truck_no") else "")),
         ("Party", t["party_name"]), ("Route", calc.route(t)),
         ("GR No.", t.get("gr_no") or "pending"),
         ("Loaded", f"{t['loaded_weight'] or 0} T on {t['loading_date']:%d/%m/%Y}" if t.get("loading_date") else "-"),
@@ -153,7 +154,7 @@ def trip_statement(trip_id: int) -> dict:
     RU = db.rate_unit()
     truck_calc = [["Truck hire", calc.rate_text(w, t["truck_rate"] or 0, RU), t["truck_hire"]]]
     if t["truck_demurrage"]:
-        truck_calc.append(["+ Demurrage", f"{t.get('demurrage_days') or ''} day(s)".strip(), t["truck_demurrage"]])
+        truck_calc.append(["+ Demurrage", f"{t['demurrage_days']} day(s)" if t.get("demurrage_days") else "", t["truck_demurrage"]])
     truck_calc += [["− Advance / payments", "", t["truck_paid"]], ["− Diesel", "", t["diesel"]],
                    ["− Commission", f"{t['commission_value']}%" if t["commission_type"] == "PERCENT" else "",
                     t["commission"]]]
@@ -161,7 +162,8 @@ def trip_statement(trip_id: int) -> dict:
         truck_calc.append(["− Shortage / damage", "", t["truck_shortage"]])
     party_calc = [["Freight", calc.rate_text(w, t["party_rate"], RU), t["party_freight"]]]
     if t["party_demurrage"]:
-        party_calc.append(["+ Demurrage", "", t["party_demurrage"]])
+        party_calc.append(["+ Demurrage", f"{t['party_demurrage_days']} day(s)" if t.get("party_demurrage_days")
+                           else "", t["party_demurrage"]])
     party_calc.append(["− Received", "", t["party_received"]])
     if t["party_tds"]:
         party_calc.append(["− TDS", f"{t['tds_rate']}%", t["party_tds"]])
@@ -240,7 +242,11 @@ def to_pdf(s: dict, company: str) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm,
                             bottomMargin=14 * mm, title=f"{s['title']} - {s['name']}", author=company)
+    from core import pdf_fonts
+    F, FB = pdf_fonts.setup()                     # font with the ₹ sign
     ss = getSampleStyleSheet()
+    for k in ("Normal", "Title", "Heading2"):
+        ss[k].fontName = FB if k != "Normal" else F
     small = ParagraphStyle("small", parent=ss["Normal"], fontSize=8, leading=10)
     cell = ParagraphStyle("cell", parent=ss["Normal"], fontSize=7.5, leading=9)
     cell_r = ParagraphStyle("cell_r", parent=cell, alignment=2)          # money: right aligned
@@ -300,7 +306,7 @@ def to_pdf(s: dict, company: str) -> bytes:
 
     def footer(canvas, doc_):
         canvas.saveState()
-        canvas.setFont("Helvetica", 7)
+        canvas.setFont(F, 7)
         canvas.setFillColor(colors.grey)
         canvas.drawString(12 * mm, 8 * mm, f"{company} · generated {clock.now():%d/%m/%Y %H:%M}")
         canvas.drawRightString(198 * mm, 8 * mm, f"Page {doc_.page}")

@@ -22,7 +22,7 @@ Cash account system mein default rahega.
 ## 2. Trip (Trip No. = trip ki pehchaan)
 - **Trip No.** booking ke time auto-generate hoga (jaise T-0001), **unique**, kabhi repeat nahi.
 - **GR No.** kai din baad milta hai → booking ke time khali rahega, baad mein manually bhara jaayega.
-- GR No. bharne par **unique check** hoga (same GR do trip mein nahi).
+- GR No. bharne par **unique check** hoga (same GR do trip mein nahi). `GR-1234`, `GR 1234` aur `gr1234` ek hi GR maane jaate hain.
 - Trip ko Trip No., Truck No. ya GR No. — teeno se search kar sakte hain.
 - Ek trip = ek party + ek truck.
 
@@ -238,7 +238,7 @@ App in cheezon ko khud check karta hai:
 3. POD se pehle truck balance payment nahi
 4. Truck ko hire se zyada payment nahi; party se freight se zyada receipt nahi
 5. Loaded trip mein dono rate bhare hon
-6. Ek truck do chalti trips mein nahi
+6. Ek truck ek hi din mein do baar nahi (ya do trips dono loading ke intezaar mein) — duplicate entry pakadne ke liye. POD aane se pehle truck ka dobara load hona normal hai, us par error nahi.
 7. Cash kabhi minus nahi
 8. Owner / Party ledger = uski trips ke balance ka jod + opening + bina-trip entries
 9. 15 din se purani pending POD (reminder)
@@ -268,3 +268,48 @@ App in cheezon ko khud check karta hai:
 - Party se "On account" (bina trip) receipt bhi ho sakti hai.
 - Trip cancel: sirf loading se pehle aur jab koi payment/diesel entry na ho.
 - Bulk upload: file ka naam = GR No. (4521.pdf, GR-4521.pdf, 4521_POD.pdf) → app khud sahi trip mein jodta hai.
+
+## Review 2 (Nov 2026) — real database par poora test
+- `schema.sql` asli PostgreSQL 16 par 2 baar chalaya: bina error, dobara chalana safe.
+- Poora kaam asli database par chala kar dekha: booking → advance/diesel → GR baad mein → party receipt (truck-wise baant) → POD → kat-kaat/demurrage → balance → statements (party/pump/owner/trip PDF) → Hisaab Check. Har jagah Debit = Credit, TDS 1% sahi, quintal rate sahi.
+- Saare 15 page aur unke saare section khol kar dekhe — koi error nahi.
+- **Naya:** same truck, same din dobara trip daalo to New Trip (aur multi-truck table) mein ⚠️ warning. Save phir bhi ho sakta hai (kabhi 2 chakkar bhi lagte hain).
+- **Naya:** GR-1234 / GR 1234 / gr1234 ab ek hi GR maane jaate hain — dobara save nahi hoga. Purane data mein aisa ho to Hisaab Check list dikhata hai.
+- **Badla:** Hisaab Check "ek truck do chalti trips" hataya (POD aane se pehle truck ka dobara load hona normal hai, galat error aata tha). Ab check: same truck same din do trip, ya do trip dono loading ke intezaar mein.
+
+## Advanced features (Nov 2026)
+
+### 🎤 Bol kar trip (New Trip)
+- Mic dabao, bolo: "UP70FT7739 Kashipur se Sultanpur, 35 ton, rate 175". AI (Gemini) awaaz ko message mein likhta hai,
+  phir wahi purana reader form bharta hai. Jo suna wo "🎤 Suna: ..." mein dikhta hai — check karke Save.
+- Kai trucks bole (har truck alag line) → multi-truck table.
+- AI key na ho to: phone keyboard ka 🎤 mic dabakar message box mein bol sakte ho (free).
+
+### ⏳ Follow-up (Party: POD & Payment → Payment follow-up)
+- **Party se paisa:** har party ka baaki, din ke hisaab se (0-15 / 16-30 / 31-60 / 60+). Din = POD party ko dene
+  ke din se; POD nahi diya to loading se. 🔴 30+ din, 🟠 15+ din.
+- "💬 WhatsApp reminder" → truck-wise list + kul baaki wala message taiyaar (party ka mobile Masters mein ho to
+  seedha usi chat mein). "✓ Bhej diya" dabao to yaad rahega kab bheja tha.
+- **Truck se POD:** jin trips ki POD truck se nahi aayi, sabse purani upar; driver / owner ko ek tap WhatsApp.
+
+### 📃 Party ka freight bill (Party: POD & Payment → Bill banao)
+- Party chuno → bina bill wali loaded trips aati hain (✓ hata kar kuch chhod bhi sakte ho) → Bill banao.
+- Bill No. financial year se: 26-27/001, 26-27/002 ... Cancel hua number dobara nahi lagta.
+- Ek trip ek hi bill mein. Bill cancel → trips phir se bill ke liye khaali.
+- Amount = freight + party demurrage (detention). Shortage party khud kaatti hai, bill mein nahi.
+- GST:
+  - **GST nahi** — sirf bill.
+  - **RCM** — bill par note "GST party bharegi (reverse charge)". Khate mein koi entry nahi.
+  - **Forward** — GST bill mein judta hai (same state CGST+SGST, alag state IGST — GSTIN ke pehle 2 ank se).
+    Entry: Party Dr / GST Payable Cr (trip se juda nahi). Trip-wise baaki sirf freight ka rehta hai.
+  - Kaunsa GST lagega ye CA se pakka karo; app sirf choice ke hisaab se banata hai.
+- Bill ke baad trip ka freight badla to bill list mein ⚠️ aata hai → bill cancel karke naya banao.
+- Bill PDF mein aapka naam / pata / GSTIN / bank — Settings → Bill details.
+
+### 💾 Roz auto backup
+- Google Drive juda ho to din mein pehli baar app kholte hi saari tables ka zip Drive → `<main folder>/Backups`
+  mein chala jaata hai. Aakhri 30 rakhe jaate hain. Status Settings → Backup mein.
+- "☁️ Abhi Drive par backup karo" se kabhi bhi.
+
+### PDF mein ₹
+- Pehle PDF mein ₹ ki jagah kaala dabba aata tha. Ab app apna font (DejaVu Sans, `assets/fonts`) use karta hai.

@@ -67,23 +67,60 @@ else:
             "`GEMINI_API_KEY = \"...\"` daalo. Bina AI ke bhi app purane tareeke se chalti rahegi.")
 
 st.divider()
-st.subheader("Backup")
-st.caption("Download everything (all tables) as one zip of CSV files. Keep a copy every week on your computer / "
-           "Google Drive — the free Supabase plan has no automatic restore.")
-if st.button("Prepare backup", use_container_width=True):
-    import io
-    import zipfile
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for tbl in ("settings", "accounts", "trucks", "lookups", "trips", "vouchers", "ledger_entries",
-                    "trip_documents", "audit_log"):
-            try:
-                z.writestr(f"{tbl}.csv", db.df(f"select * from {tbl} order by 1").to_csv(index=False))
-            except Exception as e:  # table may not exist on an old database
-                z.writestr(f"{tbl}_ERROR.txt", str(e))
-    st.download_button("⬇ Download backup zip", buf.getvalue(),
-                       file_name=f"transport_backup_{clock.today()}.zip", mime="application/zip",
-                       use_container_width=True)
+st.subheader("📃 Bill details")
+st.caption("Party ke freight bill (Party: POD & Payment → Bill banao) par ye chhapega.")
+with st.form("bill_settings"):
+    addr = st.text_area("Pata (address)", value=s.get("company_address", ""), height=70)
+    c1, c2 = st.columns(2)
+    gstin = c1.text_input("Aapka GSTIN", value=s.get("company_gstin", ""))
+    pan = c2.text_input("PAN", value=s.get("company_pan", ""))
+    c1, c2 = st.columns(2)
+    mob = c1.text_input("Mobile", value=s.get("company_mobile", ""))
+    sac = c2.text_input("SAC code", value=s.get("bill_sac", "996791"), help="GTA (road goods transport): 996791")
+    bank = st.text_area("Bank details (bill ke neeche)", value=s.get("company_bank", ""), height=70,
+                        placeholder="A/c name, A/c no., IFSC, Bank")
+    from core import bills as _bills  # noqa: E402
+    modes = list(_bills.GST_MODES)
+    cur_mode = (s.get("bill_gst_mode", "NONE") or "NONE").upper()
+    c1, c2 = st.columns(2)
+    gmode = c1.selectbox("GST (default)", modes, index=modes.index(cur_mode) if cur_mode in modes else 0,
+                         format_func=_bills.GST_MODES.get)
+    grate = c2.number_input("GST % (default)", min_value=0.0, max_value=28.0, step=1.0,
+                            value=float(s.get("bill_gst_rate", "5") or 5))
+    st.caption("GST kaunsa lagega ye apne CA se pakka kar lo — app sirf aapki choice ke hisaab se bill banata hai.")
+    if st.form_submit_button("Save bill details", type="primary"):
+        for k, v in {"company_address": addr.strip(), "company_gstin": gstin.strip().upper(),
+                     "company_pan": pan.strip().upper(), "company_mobile": mob.strip(), "bill_sac": sac.strip(),
+                     "company_bank": bank.strip(), "bill_gst_mode": gmode, "bill_gst_rate": grate}.items():
+            db.save_setting(k, v)
+        st.success("Saved.")
+
+st.divider()
+st.subheader("💾 Backup")
+from core import backup  # noqa: E402
+last = db.setting("last_auto_backup", "") or ""
+if drive.configured():
+    st.caption("Roz pehli baar app kholne par saari tables ka zip Google Drive → "
+               f"{s.get('drive_root_folder_name', 'Transport Docs')}/Backups mein apne aap jaata hai "
+               f"(aakhri {backup.KEEP} rakhe jaate hain).")
+    if "FAILED" in last:
+        st.error(f"Aakhri auto backup fail: {last}")
+    elif last:
+        st.success(f"Aakhri auto backup: {last}")
+    if st.button("☁️ Abhi Drive par backup karo", use_container_width=True):
+        try:
+            with st.spinner("Backup ho raha hai..."):
+                name = backup.file_name()
+                backup.to_drive(backup.make_zip(), name)
+            db.save_setting("last_auto_backup", f"{clock.today()} {clock.now():%H:%M} ok {name}")
+            st.success(f"Drive par save: {name}")
+        except Exception as e:
+            st.error(f"Backup nahi hua: {e}")
+else:
+    st.warning("Auto backup ke liye Google Drive jodo (README). Tab tak hafte mein ek baar neeche se download karo.")
+if st.button("Prepare backup (download)", use_container_width=True):
+    st.download_button("⬇ Download backup zip", backup.make_zip(), file_name=backup.file_name(),
+                       mime="application/zip", use_container_width=True)
 
 st.divider()
 st.subheader("Edit history")

@@ -181,6 +181,15 @@ def resolve_truck(cur, truck_no: str, owner_name: str | None) -> int:
     return cur.fetchone()["id"]
 
 
+def same_day_trips(truck_id, day) -> list[str]:
+    """Trip Nos. of this truck already entered for this date — a warning against saving the same trip twice."""
+    if not truck_id or not day:
+        return []
+    rows = db.query("select trip_no from trips where truck_id = %s and not is_cancelled "
+                    "and coalesce(loading_date, booking_date) = %s order by id", (truck_id, day))
+    return [r["trip_no"] for r in rows]
+
+
 def looks_like_truck_no(text: str) -> bool:
     import re
     return bool(re.fullmatch(r"[A-Z]{2}\d{1,2}[A-Z]{0,3}\d{3,4}", calc.normalize_truck_no(text)))
@@ -316,10 +325,12 @@ def add_voucher(cur, *, v_date, v_type, amount, dr_account, cr_account, purpose=
 
 def cancel_voucher(voucher_id: int, reason: str):
     with db.tx() as cur:
-        cur.execute("select v_type, is_cancelled, batch_no from vouchers where id=%s", (voucher_id,))
+        cur.execute("select v_type, purpose, is_cancelled, batch_no from vouchers where id=%s", (voucher_id,))
         v = cur.fetchone()
         if not v:
             raise ValueError("Entry not found.")
+        if v.get("purpose") == "BILL_GST":
+            raise ValueError("Ye bill ki GST entry hai — Party: POD & Payment → Bill mein bill cancel karo.")
         if v["v_type"] == "TRIP":
             raise ValueError("Trip bill entries change automatically when the trip is edited.")
         if v["is_cancelled"]:

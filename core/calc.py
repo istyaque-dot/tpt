@@ -319,5 +319,22 @@ def normalize_truck_no(s: str) -> str:
     return "".join(ch for ch in (s or "").upper() if ch.isalnum())
 
 
-def normalize_gr(s: str) -> str:
-    return (s or "").strip().upper()
+BLANK_TEXT = {"", "NAN", "NONE", "NULL", "NAT", "<NA>", "-"}
+
+
+def blank_text(v) -> str:
+    """Table cells come back as NaN / None when left empty — treat all of them as blank."""
+    if v is None:
+        return ""
+    try:
+        if v != v:                      # NaN
+            return ""
+    except Exception:
+        pass
+    s = str(v).strip()
+    return "" if s.upper() in BLANK_TEXT else s
+
+
+def normalize_gr(s) -> str:
+    """GR No. is optional: blank / NaN / 'nan' / 'None' all mean 'not given yet'."""
+    return blank_text(s).upper()
